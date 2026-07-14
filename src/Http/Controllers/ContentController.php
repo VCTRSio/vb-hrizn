@@ -151,7 +151,7 @@ class ContentController extends Controller
             'contentLength' => ['sometimes', 'integer', 'min:200', 'max:5000'],
         ]);
         $ctx = app(TenantContext::class);
-        $settings = app(PluginSettings::class)->resolve('hrizn');
+        $settings = app(PluginSettings::class)->resolve('vb-hrizn');
 
         // Cascade defaults from plugin settings (core router.ts:639-656).
         $articleType = $validated['articleType'] ?? ($settings['defaultArticleType'] ?? 'basic');

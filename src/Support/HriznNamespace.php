@@ -22,7 +22,7 @@ use Throwable;
  */
 final class HriznNamespace
 {
-    private const SLUG = 'hrizn';
+    private const SLUG = 'vb-hrizn';
 
     /** @return array<string, mixed> */
     public static function get(string $tenantType, string $tenantId): array

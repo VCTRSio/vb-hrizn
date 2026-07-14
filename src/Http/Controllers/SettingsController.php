@@ -101,7 +101,7 @@ class SettingsController extends Controller
         $ctx = app(TenantContext::class);
 
         // Prefer the manifest-cascaded webhookCallbackUrl over the per-call input (core:289-295).
-        $settings = app(PluginSettings::class)->resolve('hrizn');
+        $settings = app(PluginSettings::class)->resolve('vb-hrizn');
         $settingUrl = is_string($settings['webhookCallbackUrl'] ?? null) && $settings['webhookCallbackUrl'] !== ''
             ? $settings['webhookCallbackUrl'] : null;
         $callbackUrl = $settingUrl ?? ($validated['callbackUrl'] ?? null);

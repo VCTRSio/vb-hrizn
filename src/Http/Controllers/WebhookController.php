@@ -34,7 +34,7 @@ class WebhookController extends Controller
         // QOL DIVERGENCE (#6): public webhook route, no tenant context yet — the opaque
         // token IS the capability. Bypass fail-closed RLS for this pre-tenant lookup.
         $ns = SystemContext::runUnscoped(
-            fn () => PluginNamespace::query()->where('id', $token)->where('plugin_slug', 'hrizn')->first()
+            fn () => PluginNamespace::query()->where('id', $token)->where('plugin_slug', 'vb-hrizn')->first()
         );
         if ($ns === null) {
             return response()->json(['message' => 'Unknown webhook token.'], 404);

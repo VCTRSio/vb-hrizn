@@ -1,0 +1,105 @@
+{
+  "billingGate": { "blockOnDelinquent": true },
+  "id": "vb-hrizn",
+  "slug": "vb-hrizn",
+  "name": "HRIZN",
+  "version": "1.0.0",
+  "description": "AI-powered automotive content generation: keyword IdeaClouds and a generated-content library.",
+  "author": "Carmelo Santana",
+  "visibility": "first_party",
+  "status": "published",
+  "enabledByDefault": true,
+  "provider": "Vctrs\\Plugins\\VbHrizn\\HriznServiceProvider",
+  "engines": { "vctrbase": "^1.0.0" },
+  "uiMode": "module",
+  "ui": {
+    "entry": "dist/entry.js",
+    "nav": [{ "key": "hrizn", "label": "HRIZN", "path": "/dashboard/plugins/vb-hrizn/view" }],
+    "routes": [{ "route": "/dashboard/plugins/vb-hrizn/view", "title": "HRIZN" }]
+  },
+  "permissions": [
+    "hrizn.content.read.rooftop",
+    "hrizn.content.write.rooftop",
+    "hrizn.ideacloud.read.rooftop",
+    "hrizn.ideacloud.write.rooftop",
+    "hrizn.intelligence.read.rooftop",
+    "hrizn.settings.read.rooftop",
+    "hrizn.settings.write.rooftop",
+    "hrizn.admin.manage.rooftop"
+  ],
+  "settings": {
+    "permission": "hrizn.settings.write.rooftop",
+    "admin": [
+      {
+        "key": "apiKey",
+        "label": "Hrizn API Key",
+        "group": "Integration",
+        "type": "string",
+        "default": "",
+        "sensitive": true,
+        "help": "Hrizn platform API key. The write path is POST /api/v1/hrizn/settings/api-key, which validates + encrypts it; this field lets the settings UI show 'configured' and is masked (sensitive)."
+      },
+      {
+        "key": "webhookCallbackUrl",
+        "label": "Webhook Callback URL",
+        "group": "Integration",
+        "type": "string",
+        "default": "",
+        "help": "Public HTTPS URL the Hrizn platform posts lifecycle events to. Leave blank to pass it per-call when registering."
+      },
+      {
+        "key": "defaultArticleType",
+        "label": "Default Article Type",
+        "group": "Content Generation",
+        "type": "select",
+        "default": "basic",
+        "options": [
+          { "value": "basic", "label": "Basic" },
+          { "value": "qa", "label": "Q&A" },
+          { "value": "expert", "label": "Expert" },
+          { "value": "modellanding", "label": "Model Landing" },
+          { "value": "comparison", "label": "Comparison" },
+          { "value": "salesevent", "label": "Sales Event" },
+          { "value": "emailtemplate", "label": "Email Template" }
+        ]
+      },
+      {
+        "key": "defaultContentIntent",
+        "label": "Default Content Intent",
+        "group": "Content Generation",
+        "type": "select",
+        "default": "general",
+        "options": [
+          { "value": "fixed_ops", "label": "Fixed Ops" },
+          { "value": "variable", "label": "Variable" },
+          { "value": "general", "label": "General" }
+        ]
+      }
+    ],
+    "userPreferences": [
+      {
+        "key": "notifyOnIdeaCloudCompleted",
+        "type": "boolean",
+        "default": true,
+        "label": "Notify on IdeaCloud Completed",
+        "description": "Notify me when an IdeaCloud finishes processing.",
+        "group": "Notifications"
+      },
+      {
+        "key": "notifyOnContentCompleted",
+        "type": "boolean",
+        "default": true,
+        "label": "Notify on Content Completed",
+        "description": "Notify me when content generation is complete.",
+        "group": "Notifications"
+      }
+    ]
+  },
+  "nav": [{ "key": "hrizn", "label": "HRIZN", "href": "/dashboard/plugins/vb-hrizn/view", "icon": "sparkles" }],
+  "widgets": [
+    { "key": "hrizn.totalIdeaclouds", "title": "Total IdeaClouds", "permission": "hrizn.content.read.rooftop" },
+    { "key": "hrizn.latestContent", "title": "Latest Hrizn Content", "permission": "hrizn.content.read.rooftop" },
+    { "key": "hrizn.contentByType", "title": "Content by Type", "permission": "hrizn.content.read.rooftop" },
+    { "key": "hrizn.recentIdeaclouds", "title": "Recent IdeaClouds", "permission": "hrizn.content.read.rooftop" }
+  ]
+}
