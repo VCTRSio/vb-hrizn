@@ -1,16 +1,19 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Vctrs\Plugins\VbHrizn\Http\Controllers;
 
 use App\Http\Controllers\Controller;
-use Inertia\Inertia;
-use Inertia\Response;
+use App\Support\ApiResponse;
+use Illuminate\Http\JsonResponse;
 use Vctrs\Plugins\VbHrizn\Models\HriznContent;
 use Vctrs\Plugins\VbHrizn\Models\HriznIdeacloud;
 
 class OverviewController extends Controller
 {
-    public function index(): Response
+    /** GET /api/v1/hrizn/overview — dashboard aggregates (was the Hrizn/Index server-rendered page). */
+    public function overview(): JsonResponse
     {
         $stats = [
             'totalContent' => HriznContent::query()->whereNull('deleted_at')->count(),
@@ -32,7 +35,7 @@ class OverviewController extends Controller
             ->limit(5)
             ->get();
 
-        return Inertia::render('Hrizn/Index', [
+        return ApiResponse::success([
             'stats' => $stats,
             'recentContent' => $recentContent,
         ]);

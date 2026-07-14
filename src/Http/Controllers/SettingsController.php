@@ -7,6 +7,7 @@ namespace Vctrs\Plugins\VbHrizn\Http\Controllers;
 use App\Audit\AuditContext;
 use App\Http\Controllers\Controller;
 use App\Plugins\PluginSettings;
+use App\Support\ApiResponse;
 use App\Support\OutboundUrl;
 use App\Support\TenantContext;
 use Illuminate\Http\JsonResponse;
@@ -29,7 +30,7 @@ class SettingsController extends Controller
 
         $apiKey = is_string($ns['apiKey'] ?? null) ? $ns['apiKey'] : null;
 
-        return response()->json([
+        return ApiResponse::success([
             'hasApiKey' => $apiKey !== null && $apiKey !== '',
             'apiKeyPreview' => $apiKey ? 'hzk_••••••••'.substr($apiKey, -4) : null,
             'webhookId' => $ns['webhookId'] ?? null,
@@ -62,7 +63,7 @@ class SettingsController extends Controller
                 AuditContext::tag('hrizn.settings.setApiKey');
             });
 
-            return response()->json([
+            return ApiResponse::success([
                 'success' => true,
                 'siteName' => $site['name'] ?? null,
                 'siteDomain' => $site['domain'] ?? null,
@@ -81,7 +82,7 @@ class SettingsController extends Controller
             AuditContext::tag('hrizn.settings.removeApiKey');
         });
 
-        return response()->json(['success' => true]);
+        return ApiResponse::success(['success' => true]);
     }
 
     /** GET /api/v1/hrizn/settings/site — live /site fetch (core getSiteInfo). */
@@ -89,7 +90,7 @@ class SettingsController extends Controller
     {
         $ctx = app(TenantContext::class);
 
-        return HriznResponse::guard(fn () => response()->json(
+        return HriznResponse::guard(fn () => ApiResponse::success(
             $this->clients->for($ctx->activeTenantType(), $ctx->activeTenantId())->getSite()
         ));
     }
@@ -106,7 +107,7 @@ class SettingsController extends Controller
             ? $settings['webhookCallbackUrl'] : null;
         $callbackUrl = $settingUrl ?? ($validated['callbackUrl'] ?? null);
         if ($callbackUrl === null) {
-            return response()->json(['message' => 'No webhook callback URL configured. Set the webhookCallbackUrl setting or pass callbackUrl.'], 412);
+            return ApiResponse::error('No webhook callback URL configured. Set the webhookCallbackUrl setting or pass callbackUrl.', 412);
         }
 
         return HriznResponse::guard(function () use ($ctx, $callbackUrl) {
@@ -136,7 +137,7 @@ class SettingsController extends Controller
                 'webhookRegisteredAt' => now()->toIso8601String(),
             ]);
 
-            return response()->json(['success' => true, 'webhookId' => $webhook['id'] ?? null]);
+            return ApiResponse::success(['success' => true, 'webhookId' => $webhook['id'] ?? null]);
         });
     }
 
@@ -146,13 +147,13 @@ class SettingsController extends Controller
         $ctx = app(TenantContext::class);
         $ns = HriznNamespace::get($ctx->activeTenantType(), $ctx->activeTenantId());
         if (! is_string($ns['webhookId'] ?? null) || $ns['webhookId'] === '') {
-            return response()->json(['message' => 'No webhook registered.'], 412);
+            return ApiResponse::error('No webhook registered.', 412);
         }
 
         return HriznResponse::guard(function () use ($ctx, $ns) {
             $result = $this->clients->for($ctx->activeTenantType(), $ctx->activeTenantId())->testWebhook($ns['webhookId']);
 
-            return response()->json([
+            return ApiResponse::success([
                 'http_status' => $result['http_status'] ?? null,
                 'success' => $result['success'] ?? false,
             ]);

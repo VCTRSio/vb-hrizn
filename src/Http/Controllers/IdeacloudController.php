@@ -6,13 +6,11 @@ namespace Vctrs\Plugins\VbHrizn\Http\Controllers;
 
 use App\Audit\AuditContext;
 use App\Http\Controllers\Controller;
+use App\Support\ApiResponse;
 use App\Support\TenantContext;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Inertia\Inertia;
-use Inertia\Response;
 use Vctrs\Plugins\VbHrizn\Http\Requests\StoreIdeacloudRequest;
 use Vctrs\Plugins\VbHrizn\Models\HriznIdeacloud;
 use Vctrs\Plugins\VbHrizn\Services\HriznApiException;
@@ -23,18 +21,6 @@ use Vctrs\Plugins\VbHrizn\Support\HriznResponse;
 class IdeacloudController extends Controller
 {
     public function __construct(private readonly HriznClientFactory $clients) {}
-
-    public function index(): Response
-    {
-        $ideaclouds = HriznIdeacloud::query()
-            ->whereNull('deleted_at')
-            ->withCount(['content' => fn ($q) => $q->whereNull('deleted_at')])
-            ->orderByDesc('created_at')
-            ->limit(100)
-            ->get();
-
-        return Inertia::render('Hrizn/Ideaclouds', ['ideaclouds' => $ideaclouds]);
-    }
 
     /**
      * GET /api/v1/hrizn/ideaclouds — API-first, local-DB fallback (core ideaclouds.list, router.ts:360-416).
@@ -64,7 +50,7 @@ class IdeacloudController extends Controller
                 ->limit($limit)
                 ->get(['id', 'hrizn_id', 'keyword', 'status']);
 
-            return response()->json([
+            return ApiResponse::success([
                 // QOL DIVERGENCE (id-correlation, README T2B-16): admin mutation routes key on the
                 // local UUID; carry localId = the local row id so the fallback shape matches the
                 // enriched API path below and admins can correlate a listed item to the row to mutate.
@@ -87,7 +73,7 @@ class IdeacloudController extends Controller
 
             $items = $this->enrichWithLocalId($res['data']);
 
-            return response()->json(['items' => $items, 'pagination' => $res['pagination'], 'source' => 'api']);
+            return ApiResponse::success(['items' => $items, 'pagination' => $res['pagination'], 'source' => 'api']);
         });
     }
 
@@ -141,7 +127,7 @@ class IdeacloudController extends Controller
             } catch (HriznApiException $e) {
                 if ($local !== null) {
                     // Return the local snapshot if the API read fails (core get() catch, router.ts:460-467).
-                    return response()->json([
+                    return ApiResponse::success([
                         'id' => $local->hrizn_id, 'keyword' => $local->keyword, 'status' => $local->status,
                     ]);
                 }
@@ -151,29 +137,35 @@ class IdeacloudController extends Controller
                 $local->update(['status' => $api['status']]);
             }
 
-            return response()->json($api);
+            return ApiResponse::success($api);
         });
     }
 
-    public function store(StoreIdeacloudRequest $request): RedirectResponse
+    /**
+     * POST /api/v1/hrizn/ideaclouds — create an ideacloud (core ideaclouds.create). The
+     * ESM create form calls this via the axios kit; on client/precondition failure return the
+     * ApiResponse error envelope instead of a server-side back() redirect.
+     */
+    public function store(StoreIdeacloudRequest $request): JsonResponse
     {
         $ctx = app(TenantContext::class);
 
         try {
             $client = $this->clients->for($ctx->activeTenantType(), $ctx->activeTenantId());
         } catch (HriznPreconditionException $e) {
-            return back()->with('error', $e->getMessage());
+            return ApiResponse::error($e->getMessage(), 412);
         }
 
         try {
             $api = $client->createIdeaCloud($request->keyword);
         } catch (HriznApiException $e) {
-            return back()->with('error', $e->getMessage());
+            return ApiResponse::error($e->getMessage(), 502);
         }
 
-        DB::transaction(function () use ($request, $api, $ctx) {
+        $created = DB::transaction(function () use ($request, $api, $ctx) {
             AuditContext::tag('hrizn.ideacloud.create');
-            HriznIdeacloud::create([
+
+            return HriznIdeacloud::create([
                 'keyword' => $request->keyword,
                 'status' => $api['status'] ?? 'researching',
                 'hrizn_id' => $api['id'],
@@ -181,15 +173,7 @@ class IdeacloudController extends Controller
             ]);
         });
 
-        return back()->with('success', 'IdeaCloud created');
-    }
-
-    public function show(string $id): Response
-    {
-        $ideacloud = HriznIdeacloud::query()->whereNull('deleted_at')->findOrFail($id);
-        $content = $ideacloud->content()->whereNull('deleted_at')->orderByDesc('created_at')->get();
-
-        return Inertia::render('Hrizn/IdeacloudShow', ['ideacloud' => $ideacloud, 'content' => $content]);
+        return ApiResponse::success($created);
     }
 
     /**
@@ -205,7 +189,7 @@ class IdeacloudController extends Controller
             HriznIdeacloud::query()->where('hrizn_id', $id)
                 ->update(['status' => $api['status'] ?? 'researching']);
 
-            return response()->json($api);
+            return ApiResponse::success($api);
         });
     }
 }

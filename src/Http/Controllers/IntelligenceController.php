@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Vctrs\Plugins\VbHrizn\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Support\ApiResponse;
 use App\Support\TenantContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -32,7 +33,7 @@ class IntelligenceController extends Controller
                     'cursor' => $validated['cursor'] ?? null,
                 ]);
 
-            return response()->json(['items' => $res['data'], 'pagination' => $res['pagination']]);
+            return ApiResponse::success(['items' => $res['data'], 'pagination' => $res['pagination']]);
         });
     }
 
@@ -41,7 +42,7 @@ class IntelligenceController extends Controller
     {
         $ctx = app(TenantContext::class);
 
-        return HriznResponse::guard(fn () => response()->json(
+        return HriznResponse::guard(fn () => ApiResponse::success(
             $this->clients->for($ctx->activeTenantType(), $ctx->activeTenantId())->getIntelligenceSummary()
         ));
     }
@@ -65,7 +66,7 @@ class IntelligenceController extends Controller
                 'created_by' => $ctx->userId(),
             ]);
 
-            return response()->json($api);
+            return ApiResponse::success($api);
         });
     }
 }

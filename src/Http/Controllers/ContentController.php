@@ -7,12 +7,11 @@ namespace Vctrs\Plugins\VbHrizn\Http\Controllers;
 use App\Audit\AuditContext;
 use App\Http\Controllers\Controller;
 use App\Plugins\PluginSettings;
+use App\Support\ApiResponse;
 use App\Support\TenantContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Inertia\Inertia;
-use Inertia\Response;
 use Vctrs\Plugins\VbHrizn\Models\HriznContent;
 use Vctrs\Plugins\VbHrizn\Models\HriznIdeacloud;
 use Vctrs\Plugins\VbHrizn\Support\HriznClientFactory;
@@ -28,22 +27,6 @@ class ContentController extends Controller
     private const CONTENT_INTENTS = ['fixed_ops', 'variable', 'general'];
 
     public function __construct(private readonly HriznClientFactory $clients) {}
-
-    public function index(): Response
-    {
-        $items = HriznContent::query()->with('ideacloud:id,keyword')
-            ->whereNull('deleted_at')->orderByDesc('created_at')->limit(100)->get();
-
-        return Inertia::render('Hrizn/Content', ['items' => $items]);
-    }
-
-    public function show(string $id): Response
-    {
-        $content = HriznContent::query()->with('ideacloud:id,keyword,status')
-            ->whereNull('deleted_at')->findOrFail($id);
-
-        return Inertia::render('Hrizn/ContentShow', ['content' => $content]);
-    }
 
     /** GET /api/v1/hrizn/content — API-first, local fallback (core content.list). */
     public function apiList(Request $request): JsonResponse
@@ -66,7 +49,7 @@ class ContentController extends Controller
             $rows = HriznContent::query()
                 ->whereNull('deleted_at')->orderByDesc('created_at')->limit($limit)->get();
 
-            return response()->json([
+            return ApiResponse::success([
                 // QOL DIVERGENCE (id-correlation, README T2B-16): admin mutation routes key on the
                 // local UUID; carry localId = the local row id so the fallback shape matches the
                 // enriched API path below and admins can correlate a listed item to the row to mutate.
@@ -90,7 +73,7 @@ class ContentController extends Controller
 
             $items = $this->enrichWithLocalId($res['data']);
 
-            return response()->json(['items' => $items, 'pagination' => $res['pagination'], 'source' => 'api']);
+            return ApiResponse::success(['items' => $items, 'pagination' => $res['pagination'], 'source' => 'api']);
         });
     }
 
@@ -133,7 +116,7 @@ class ContentController extends Controller
     {
         $ctx = app(TenantContext::class);
 
-        return HriznResponse::guard(fn () => response()->json(
+        return HriznResponse::guard(fn () => ApiResponse::success(
             $this->clients->for($ctx->activeTenantType(), $ctx->activeTenantId())->getContent($id)
         ));
     }
@@ -156,7 +139,7 @@ class ContentController extends Controller
         // Cascade defaults from plugin settings (core router.ts:639-656).
         $articleType = $validated['articleType'] ?? ($settings['defaultArticleType'] ?? 'basic');
         if (! in_array($articleType, self::ARTICLE_TYPES, true)) {
-            return response()->json(['message' => "Invalid articleType: {$articleType}"], 400);
+            return ApiResponse::error("Invalid articleType: {$articleType}", 400);
         }
         $contentIntent = $validated['contentIntent'] ?? ($settings['defaultContentIntent'] ?? 'general');
         if (! in_array($contentIntent, self::CONTENT_INTENTS, true)) {
@@ -197,7 +180,7 @@ class ContentController extends Controller
                 ]);
             });
 
-            return response()->json($api);
+            return ApiResponse::success($api);
         });
     }
 
@@ -245,7 +228,7 @@ class ContentController extends Controller
                 });
             }
 
-            return response()->json($results);
+            return ApiResponse::success($results);
         });
     }
 
@@ -254,7 +237,7 @@ class ContentController extends Controller
     {
         $ctx = app(TenantContext::class);
 
-        return HriznResponse::guard(fn () => response()->json([
+        return HriznResponse::guard(fn () => ApiResponse::success([
             'html' => $this->clients->for($ctx->activeTenantType(), $ctx->activeTenantId())->getContentHtml($id),
         ]));
     }
@@ -264,7 +247,7 @@ class ContentController extends Controller
     {
         $ctx = app(TenantContext::class);
 
-        return HriznResponse::guard(fn () => response()->json(
+        return HriznResponse::guard(fn () => ApiResponse::success(
             $this->clients->for($ctx->activeTenantType(), $ctx->activeTenantId())->getContentComponents($id)
         ));
     }

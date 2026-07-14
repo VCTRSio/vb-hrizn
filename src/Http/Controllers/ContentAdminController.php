@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace Vctrs\Plugins\VbHrizn\Http\Controllers;
 
-use App\Plugins\Admin\PluginAdminController;
+use Vctrs\Plugins\VbHrizn\Http\Controllers\Admin\AdminController;
 use Vctrs\Plugins\VbHrizn\Models\HriznContent;
 
-class ContentAdminController extends PluginAdminController
+class ContentAdminController extends AdminController
 {
     protected function model(): string
     {
