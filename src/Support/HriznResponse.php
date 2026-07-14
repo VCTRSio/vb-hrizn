@@ -4,13 +4,15 @@ declare(strict_types=1);
 
 namespace Vctrs\Plugins\VbHrizn\Support;
 
+use App\Support\ApiResponse;
 use Closure;
 use Illuminate\Http\JsonResponse;
 use Vctrs\Plugins\VbHrizn\Services\HriznApiException;
 
 /**
- * Maps HriznClient exceptions to HTTP JSON responses. Ports core router.ts
- * callHrizn() (status → tRPC code) + getClient()'s PRECONDITION_FAILED.
+ * Maps HriznClient exceptions to the canonical ApiResponse error envelope. Ports core
+ * router.ts callHrizn() (status → code) + getClient()'s PRECONDITION_FAILED, now emitting
+ * {traceId,data:null,status:error,error} so the @vctrs/plugin-ui client kit can unwrap it.
  */
 final class HriznResponse
 {
@@ -25,11 +27,9 @@ final class HriznResponse
         try {
             return $fn();
         } catch (HriznPreconditionException $e) {
-            return response()->json(['message' => $e->getMessage()], 412);
+            return ApiResponse::error($e->getMessage(), 412);
         } catch (HriznApiException $e) {
-            $http = self::STATUS_MAP[$e->status()] ?? 500;
-
-            return response()->json(['message' => $e->getMessage(), 'code' => $e->code()], $http);
+            return ApiResponse::error($e->getMessage(), self::STATUS_MAP[$e->status()] ?? 500);
         }
     }
 }

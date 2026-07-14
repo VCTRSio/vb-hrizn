@@ -32,3 +32,8 @@ All notable changes to HRIZN are documented here.
   not Bearer tokens.
 - Public HMAC webhook receiver (`WebhookController` + `HriznWebhookSignature`) for
   platform lifecycle events, backed by a per-tenant encrypted secret store.
+- `HriznResponse::guard` now emits the canonical `ApiResponse` error envelope
+  (`{traceId,data:null,status:error,error}`) so the vendored `@vctrs/plugin-ui`
+  client kit can unwrap failures. The former `code` field returned on
+  `HriznApiException` is dropped — `ApiResponse::error` carries only the `error`
+  message (the code was unused by the reference frontend).
