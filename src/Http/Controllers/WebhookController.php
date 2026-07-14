@@ -33,6 +33,9 @@ class WebhookController extends Controller
     {
         // QOL DIVERGENCE (#6): public webhook route, no tenant context yet — the opaque
         // token IS the capability. Bypass fail-closed RLS for this pre-tenant lookup.
+        // Both reads below (the namespace row AND the per-tenant secret) hit FORCE-RLS
+        // tenant tables (plugin_namespaces) BEFORE any app.tenant_* GUC is set — the
+        // tenant is being resolved FROM this lookup — so each must run under runUnscoped.
         $ns = SystemContext::runUnscoped(
             fn () => PluginNamespace::query()->where('id', $token)->where('plugin_slug', 'vb-hrizn')->first()
         );
@@ -42,7 +45,11 @@ class WebhookController extends Controller
         $tenantType = (string) $ns->getAttribute('tenant_type');
         $tenantId = (string) $ns->getAttribute('tenant_id');
 
-        $secrets = HriznNamespace::get($tenantType, $tenantId);
+        // Same pre-tenant bypass: the secret lives in plugin_namespaces (FORCE RLS) and
+        // is read before the GUC is set, so a bare get() is invisible to app_user.
+        $secrets = SystemContext::runUnscoped(
+            fn () => HriznNamespace::get($tenantType, $tenantId)
+        );
         $secret = $secrets['webhookSecret'] ?? null;
         if (! is_string($secret) || $secret === '') {
             return response()->json(['message' => 'Webhook not configured.'], 404);
