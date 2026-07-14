@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="HRIZN — AI content sparkles">
+  <title>HRIZN</title>
+  <defs>
+    <linearGradient id="hz-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7c3aed"/>
+      <stop offset="1" stop-color="#1e3a8a"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="url(#hz-bg)"/>
+  <g fill="#ffffff">
+    <path d="M62 26
+             C64 44 70 50 88 52
+             C70 54 64 60 62 78
+             C60 60 54 54 36 52
+             C54 50 60 44 62 26 Z" opacity="0.98"/>
+    <path d="M96 74
+             C97 84 100 87 110 88
+             C100 89 97 92 96 102
+             C95 92 92 89 82 88
+             C92 87 95 84 96 74 Z" opacity="0.9"/>
+    <path d="M36 84
+             C37 92 39 94 47 95
+             C39 96 37 98 36 106
+             C35 98 33 96 25 95
+             C33 94 35 92 36 84 Z" opacity="0.85"/>
+  </g>
+</svg>
