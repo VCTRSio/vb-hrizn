@@ -8,7 +8,7 @@ secret store.
 **Verified · by Carmelo Santana.** First-party, signed, PHP-native plugin.
 Slug `vb-hrizn` · namespace `Vctrs\Plugins\VbHrizn`. Ships from outside the
 monorepo and is autoloaded by `App\Plugins\RuntimeAutoloader`. Its release ZIP is
-signed with the Carmelo Santana Ed25519 key (`keyId carmelo-ed25519-2026`), so it
+signed with the VCTRS Ed25519 key (`keyId vctrs-ed25519-2026`), so it
 installs as **Verified** and its server code boots under the `signed_first_party`
 trust tier. **Touches no core files.**
 
@@ -41,7 +41,7 @@ Manual/offline install of a specific release:
 gh release download v1.0.0 -R carmelosantana/vb-hrizn \
   -p 'vb-hrizn-1.0.0.zip' -p 'vb-hrizn-1.0.0.zip.sig'
 # upload the .zip (+ .sig) at /dashboard/plugins — the installer verifies the
-# signature against keyId "carmelo-ed25519-2026" before enabling server code.
+# signature against keyId "vctrs-ed25519-2026" before enabling server code.
 ```
 
 ## Usage
