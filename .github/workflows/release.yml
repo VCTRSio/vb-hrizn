@@ -1,0 +1,123 @@
+# Release workflow for the HRIZN plugin.
+#
+# On a `v*` tag push this builds the shippable ZIP, signs it with the VCTRS
+# Ed25519 key (GitHub Actions secret `PLUGIN_SIGNING_KEY`), publishes a GitHub
+# Release with the `.zip` + `.sig` attached, and prints the marketplace
+# `artifact` block (url + digest + signature + keyId) to the job summary.
+#
+# This plugin ships a frontend bundle: Node is set up and
+# `npm ci && npm run build` runs BEFORE the packaging step so `dist/entry.js`
+# exists in the artifact.
+#
+# Cross-repo submission to VCTRSio/marketplace-repository is MANUAL for the MVP
+# (spec §6.4) — the author copies the printed artifact block into
+# `/plugins/vb-hrizn/manifest.json` and opens the PR by hand. This workflow
+# deliberately does NOT automate that step (no cross-repo token provisioned).
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write # required to create the GitHub Release for the tag
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      KEY_ID: vctrs-ed25519-2026
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP 8.3 (sodium + zip)
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: sodium, zip
+          tools: none
+          coverage: none
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build frontend bundle
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build
+          test -f dist/entry.js || { echo "dist/entry.js missing after build" >&2; exit 1; }
+
+      - name: Derive version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build plugin ZIP
+        run: |
+          set -euo pipefail
+          scripts/build-zip.sh "${{ steps.version.outputs.version }}"
+
+      - name: Sign artifact
+        id: sign
+        env:
+          # OPERATOR TODO: set the PLUGIN_SIGNING_KEY repo secret (VCTRS private key) before tagging a release.
+          # The private key never touches the log: it is consumed from this env
+          # var into a temp file, and only the digest + signature (public data)
+          # are emitted.
+          PLUGIN_SIGNING_KEY: ${{ secrets.PLUGIN_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          ZIP="dist/vb-hrizn-${VERSION}.zip"
+
+          KEYFILE="$(mktemp)"
+          trap 'rm -f "$KEYFILE"' EXIT
+          # Write the secret to the temp keyfile WITHOUT echoing it.
+          printf '%s' "$PLUGIN_SIGNING_KEY" > "$KEYFILE"
+
+          # sign.php writes "$ZIP.sig" and prints the sha256 hex digest to stdout.
+          DIGEST="$(php tools/sign.php "$ZIP" "$KEYFILE")"
+
+          # Shred the keyfile immediately (also covered by the EXIT trap).
+          rm -f "$KEYFILE"
+          trap - EXIT
+
+          SIGNATURE="$(cat "${ZIP}.sig")"
+          {
+            echo "digest=${DIGEST}"
+            echo "signature=${SIGNATURE}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Write marketplace-submission summary
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          ZIP_NAME="vb-hrizn-${VERSION}.zip"
+          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${ZIP_NAME}"
+          {
+            echo "## HRIZN ${GITHUB_REF_NAME} — marketplace artifact block"
+            echo ""
+            echo "Manual submission (spec §6.4): paste this \`artifact\` block into"
+            echo "\`/plugins/vb-hrizn/manifest.json\` in **VCTRSio/marketplace-repository**"
+            echo "and open the PR by hand."
+            echo ""
+            echo '```json'
+            echo '"artifact": {'
+            echo "  \"url\": \"${URL}\","
+            echo "  \"digest\": \"${{ steps.sign.outputs.digest }}\","
+            echo "  \"signature\": \"${{ steps.sign.outputs.signature }}\","
+            echo "  \"keyId\": \"${KEY_ID}\""
+            echo '}'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/vb-hrizn-${{ steps.version.outputs.version }}.zip
+            dist/vb-hrizn-${{ steps.version.outputs.version }}.zip.sig
