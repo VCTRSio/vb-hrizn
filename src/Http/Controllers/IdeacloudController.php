@@ -150,30 +150,24 @@ class IdeacloudController extends Controller
     {
         $ctx = app(TenantContext::class);
 
-        try {
+        return HriznResponse::guard(function () use ($request, $ctx) {
             $client = $this->clients->for($ctx->activeTenantType(), $ctx->activeTenantId());
-        } catch (HriznPreconditionException $e) {
-            return ApiResponse::error($e->getMessage(), 412);
-        }
 
-        try {
             $api = $client->createIdeaCloud($request->keyword);
-        } catch (HriznApiException $e) {
-            return ApiResponse::error($e->getMessage(), 502);
-        }
 
-        $created = DB::transaction(function () use ($request, $api, $ctx) {
-            AuditContext::tag('hrizn.ideacloud.create');
+            $created = DB::transaction(function () use ($request, $api, $ctx) {
+                AuditContext::tag('hrizn.ideacloud.create');
 
-            return HriznIdeacloud::create([
-                'keyword' => $request->keyword,
-                'status' => $api['status'] ?? 'researching',
-                'hrizn_id' => $api['id'],
-                'created_by' => $ctx->userId(),
-            ]);
+                return HriznIdeacloud::create([
+                    'keyword' => $request->keyword,
+                    'status' => $api['status'] ?? 'researching',
+                    'hrizn_id' => $api['id'],
+                    'created_by' => $ctx->userId(),
+                ]);
+            });
+
+            return ApiResponse::success($created);
         });
-
-        return ApiResponse::success($created);
     }
 
     /**
