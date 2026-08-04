@@ -5,7 +5,7 @@
   "name": "HRIZN",
   "version": "1.0.0",
   "description": "AI-powered automotive content generation: keyword IdeaClouds and a generated-content library.",
-  "author": "Carmelo Santana",
+  "author": "Angus Fox",
   "visibility": "first_party",
   "status": "published",
   "enabledByDefault": true,

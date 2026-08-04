@@ -27,7 +27,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     env:
-      KEY_ID: vctrs-ed25519-2026
+      KEY_ID: angusfox-ed25519-2026
     steps:
       - name: Checkout
         uses: actions/checkout@v4
