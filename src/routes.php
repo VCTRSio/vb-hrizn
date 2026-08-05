@@ -8,6 +8,7 @@ use Vctrs\Plugins\VbHrizn\Http\Controllers\IdeacloudController;
 use Vctrs\Plugins\VbHrizn\Http\Controllers\IntelligenceController;
 use Vctrs\Plugins\VbHrizn\Http\Controllers\OverviewController;
 use Vctrs\Plugins\VbHrizn\Http\Controllers\SettingsController;
+use Vctrs\Plugins\VbHrizn\Http\Controllers\VehicleSearchController;
 use Vctrs\Plugins\VbHrizn\Http\Controllers\WebhookController;
 
 // ── Session-authed /api/v1/hrizn/* (extracted-plugin browser surface) ─────────
@@ -31,6 +32,8 @@ Route::middleware(['web', 'session-api'])->prefix('api/v1/hrizn')->name('hrizn.a
     Route::put('/content/{id}/admin', [ContentAdminController::class, 'update'])->middleware('can:hrizn.admin.manage.rooftop')->where('id', '[0-9a-f-]{36}')->name('content.admin.update');
     Route::delete('/content/{id}/admin', [ContentAdminController::class, 'softDelete'])->middleware('can:hrizn.admin.manage.rooftop')->where('id', '[0-9a-f-]{36}')->name('content.admin.softDelete');
     Route::post('/content/{id}/admin/restore', [ContentAdminController::class, 'restore'])->middleware('can:hrizn.admin.manage.rooftop')->where('id', '[0-9a-f-]{36}')->name('content.admin.restore');
+
+    Route::get('/vehicles/search', [VehicleSearchController::class, 'search'])->middleware('can:hrizn.content.write.rooftop')->name('vehicles.search');
 
     Route::get('/intelligence/summary', [IntelligenceController::class, 'summary'])->middleware('can:hrizn.intelligence.read.rooftop')->name('intelligence.summary');
     Route::get('/intelligence', [IntelligenceController::class, 'list'])->middleware('can:hrizn.intelligence.read.rooftop')->name('intelligence.list');

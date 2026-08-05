@@ -22,13 +22,24 @@ const get = vi.fn(async (path: string) => {
     return envelope({ id: 'i1', keyword: 'Silverado towing', status: 'complete' });
   if (path === '/content')
     return envelope({ items: [{ id: 'c1', article_type: 'basic', content_intent: 'general', status: 'complete', localId: 'l1' }], pagination: {}, source: 'local' });
+  if (path.startsWith('/vehicles/search'))
+    return envelope([{ vin: '1HGCM82633A004352', year: 2022, make: 'Honda', model: 'Accord', trim: 'EX' }]);
+  if (path === '/content/c1/html') return envelope({ html: '<p>Article body</p>' });
+  if (path === '/content/c1')
+    return envelope({
+      id: 'c1',
+      article_type: 'modellanding',
+      content_intent: 'general',
+      status: 'complete',
+      linkedVehicles: [{ vin: '1HGCM82633A004352', year: 2022, make: 'Honda', model: 'Accord', trim: 'EX' }],
+    });
   if (path === '/settings')
     return envelope({ hasApiKey: false, apiKeyPreview: null, webhookId: null, siteName: null });
   return envelope({});
 });
 
 vi.mock('axios', () => {
-  const client = { get, post: vi.fn(), delete: vi.fn() };
+  const client = { get, post: vi.fn(async () => envelope(null)), delete: vi.fn() };
   return { default: { create: () => client } };
 });
 
@@ -49,6 +60,16 @@ const host = {
 };
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
+
+const click = (el: Element) => el.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+
+// Drive a controlled <select> the way React expects: use the native value setter
+// then dispatch a bubbling 'change' so React's synthetic onChange fires.
+function setSelect(select: HTMLSelectElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!;
+  setter.call(select, value);
+  select.dispatchEvent(new window.Event('change', { bubbles: true }));
+}
 
 async function waitFor<T>(check: () => T | null | undefined, tries = 50): Promise<T> {
   for (let i = 0; i < tries; i++) {
@@ -96,6 +117,66 @@ describe('hrizn esm entry', () => {
     await waitFor(() => el.querySelector('[data-testid="hrizn-ideacloud-row"]'));
     expect(el.querySelector('[data-testid="hrizn-ideaclouds"]')).not.toBeNull();
     expect(el.textContent).toContain('Silverado towing');
+    cleanup?.();
+  });
+
+  it('shows a "Ready to publish" badge for a complete content row', async () => {
+    const el = document.createElement('div');
+    const cleanup = plugin.mount(el, host as any, { slug: 'vb-hrizn', route: '' });
+
+    const btn = await waitFor(() =>
+      Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Content Library'),
+    );
+    click(btn as HTMLButtonElement);
+
+    // The host test-mock Badge forwards only children (drops data-testid), so
+    // assert on the rendered pill text.
+    await waitFor(() => (el.textContent?.includes('Ready to publish') ? true : null));
+    expect(el.textContent).toContain('Ready to publish');
+    cleanup?.();
+  });
+
+  it('renders the vehicle picker for modellanding but not for basic', async () => {
+    const el = document.createElement('div');
+    const cleanup = plugin.mount(el, host as any, { slug: 'vb-hrizn', route: '' });
+
+    const nav = await waitFor(() =>
+      Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Content Library'),
+    );
+    click(nav as HTMLButtonElement);
+
+    const gen = await waitFor(() =>
+      Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Generate Content'),
+    );
+    click(gen as HTMLButtonElement);
+
+    // The article-type <select> is a real element (real data-testid); default is
+    // 'basic' → no vehicle field.
+    const select = (await waitFor(() => el.querySelector('[data-testid="hrizn-article-type"]'))) as HTMLSelectElement;
+    expect(el.querySelector('[data-testid="hrizn-vehicle-field"]')).toBeNull();
+
+    // Switching to a vehicle-specific type reveals the picker.
+    setSelect(select, 'modellanding');
+    await waitFor(() => el.querySelector('[data-testid="hrizn-vehicle-field"]'));
+    expect(el.querySelector('[data-testid="hrizn-vehicle-field"]')).not.toBeNull();
+    cleanup?.();
+  });
+
+  it('renders a linked-vehicle chip on the content show view when present', async () => {
+    const el = document.createElement('div');
+    const cleanup = plugin.mount(el, host as any, { slug: 'vb-hrizn', route: '' });
+
+    const nav = await waitFor(() =>
+      Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Content Library'),
+    );
+    click(nav as HTMLButtonElement);
+
+    const row = await waitFor(() => el.querySelector('[data-testid="hrizn-content-row"]'));
+    click(row as Element);
+
+    // Chip is a Badge (mock drops data-testid) → assert on its rendered label.
+    await waitFor(() => (el.textContent?.includes('🔗 2022 Honda Accord') ? true : null));
+    expect(el.textContent).toContain('🔗 2022 Honda Accord');
     cleanup?.();
   });
 

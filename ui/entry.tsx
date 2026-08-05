@@ -52,6 +52,16 @@ const INTENT_LABELS: Record<string, string> = {
   general: 'General',
 };
 
+// Article types that describe a specific vehicle and can be VIN-linked (mirrors
+// ContentController::VEHICLE_ARTICLE_TYPES) — only these show the vehicle picker.
+const VEHICLE_ARTICLE_TYPES = ['modellanding', 'comparison'];
+
+// One-line label for a picker vehicle: "{year} {make} {model} {trim} — {vin}".
+function vehicleLabel(v: any): string {
+  const head = [v.year, v.make, v.model, v.trim].filter((p: any) => p != null && p !== '').join(' ');
+  return v.vin ? (head ? `${head} — ${v.vin}` : String(v.vin)) : head;
+}
+
 // shadcn Badge variants, mirrored from the source status helpers.
 function contentStatusVariant(status: string): string {
   if (status === 'complete') return 'default';
@@ -172,6 +182,154 @@ const plugin: PluginModule = {
 
     function StatusBadge({ status, variant }: { status: string; variant: string }) {
       return R.createElement(Badge, { variant, style: { textTransform: 'capitalize' } }, titleize(status));
+    }
+
+    // "Ready to publish" pill — shown once content generation is complete.
+    function ReadyBadge({ status }: { status: string }) {
+      if (status !== 'complete') return null;
+      return R.createElement(Badge, { variant: 'default', 'data-testid': 'hrizn-ready-badge' }, 'Ready to publish');
+    }
+
+    // ── Vehicle picker (session-API passthrough to inventory-hub) ────────────────
+    // Types a query into GET /vehicles/search and lets the user pick a vehicle; the
+    // chosen VIN is lifted to the generate form. Degrades to no suggestions when
+    // inventory-hub is not installed (the endpoint returns []).
+    function VehiclePicker({ vin, onSelect }: { vin: string; onSelect: (vin: string) => void }) {
+      const [q, setQ] = R.useState('');
+      const [results, setResults] = R.useState<any[]>([]);
+
+      R.useEffect(() => {
+        const term = q.trim();
+        if (term === '') {
+          setResults([]);
+          return;
+        }
+        let alive = true;
+        apiGet<any[]>('/vehicles/search?q=' + encodeURIComponent(term), api)
+          .then((rows) => alive && setResults(Array.isArray(rows) ? rows.slice(0, 8) : []))
+          .catch(() => alive && setResults([]));
+        return () => {
+          alive = false;
+        };
+      }, [q]);
+
+      return R.createElement(
+        'div',
+        { 'data-testid': 'hrizn-vehicle-field', style: { display: 'grid', gap: 6 } },
+        R.createElement('label', { style: { fontSize: 14, fontWeight: 500 } }, 'Vehicle (optional)'),
+        vin
+          ? R.createElement(
+              'div',
+              { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+              R.createElement(Badge, { variant: 'secondary', 'data-testid': 'hrizn-vehicle-selected' }, '🔗 ' + vin),
+              R.createElement(Button, { variant: 'ghost', size: 'sm', onClick: () => onSelect('') }, 'Clear'),
+            )
+          : R.createElement(
+              R.Fragment,
+              null,
+              R.createElement('input', {
+                value: q,
+                onChange: (e: any) => setQ(e.target.value),
+                placeholder: 'Search inventory by make, model, or VIN',
+                style: { padding: '8px 10px', border: '1px solid rgba(128,128,128,0.4)', borderRadius: 6, fontSize: 14 },
+              }),
+              results.length > 0 &&
+                R.createElement(
+                  'div',
+                  { style: { display: 'grid', gap: 4 } },
+                  results.map((v: any) =>
+                    R.createElement(
+                      'button',
+                      {
+                        key: v.vin,
+                        type: 'button',
+                        'data-testid': 'hrizn-vehicle-suggestion',
+                        onClick: () => {
+                          onSelect(String(v.vin));
+                          setQ('');
+                          setResults([]);
+                        },
+                        style: { textAlign: 'left', padding: '6px 8px', border: '1px solid rgba(128,128,128,0.3)', borderRadius: 6, fontSize: 13, background: 'transparent', cursor: 'pointer' },
+                      },
+                      vehicleLabel(v),
+                    ),
+                  ),
+                ),
+            ),
+      );
+    }
+
+    // ── Content-generation form (POST /content) ──────────────────────────────────
+    // Article type drives whether the vehicle picker renders; the VIN is only sent
+    // for vehicle-specific article types (modellanding / comparison).
+    function GenerateForm({ onDone }: { onDone: () => void }) {
+      const [ideacloudId, setIdeacloudId] = R.useState('');
+      const [articleType, setArticleType] = R.useState('basic');
+      const [vehicleVin, setVehicleVin] = R.useState('');
+      const [submitting, setSubmitting] = R.useState(false);
+      const [formError, setFormError] = R.useState<string | null>(null);
+
+      const isVehicleType = VEHICLE_ARTICLE_TYPES.includes(articleType);
+
+      // Drop any selected VIN when leaving a vehicle-specific type so it's never sent.
+      R.useEffect(() => {
+        if (!isVehicleType && vehicleVin) setVehicleVin('');
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, [articleType]);
+
+      function submit() {
+        const ic = ideacloudId.trim();
+        if (!ic || submitting) return;
+        setSubmitting(true);
+        setFormError(null);
+        const payload: Record<string, any> = { ideacloudId: ic, articleType };
+        if (isVehicleType && vehicleVin) payload.vehicleVin = vehicleVin;
+        api
+          .post('/content', payload)
+          .then((r: any) => r.data.data)
+          .then(() => {
+            setIdeacloudId('');
+            setVehicleVin('');
+            onDone();
+          })
+          .catch((e: any) => setFormError(e?.response?.data?.error ?? String(e)))
+          .finally(() => setSubmitting(false));
+      }
+
+      return R.createElement(
+        Card,
+        { 'data-testid': 'hrizn-generate-form' },
+        R.createElement(CardHeader, null, R.createElement(CardTitle, { style: { fontSize: 16 } }, 'Generate Content')),
+        R.createElement(
+          CardContent,
+          { style: { display: 'grid', gap: 8 } },
+          R.createElement('label', { style: { fontSize: 14, fontWeight: 500 } }, 'IdeaCloud ID *'),
+          R.createElement('input', {
+            value: ideacloudId,
+            onChange: (e: any) => setIdeacloudId(e.target.value),
+            placeholder: 'IdeaCloud id to generate from',
+            style: { padding: '8px 10px', border: '1px solid rgba(128,128,128,0.4)', borderRadius: 6, fontSize: 14 },
+          }),
+          R.createElement('label', { style: { fontSize: 14, fontWeight: 500 } }, 'Article Type'),
+          R.createElement(
+            'select',
+            {
+              value: articleType,
+              'data-testid': 'hrizn-article-type',
+              onChange: (e: any) => setArticleType(e.target.value),
+              style: { padding: '8px 10px', border: '1px solid rgba(128,128,128,0.4)', borderRadius: 6, fontSize: 14 },
+            },
+            Object.keys(ARTICLE_TYPE_LABELS).map((t) => R.createElement('option', { key: t, value: t }, ARTICLE_TYPE_LABELS[t])),
+          ),
+          isVehicleType && R.createElement(VehiclePicker, { vin: vehicleVin, onSelect: setVehicleVin }),
+          formError && R.createElement('p', { style: { fontSize: 13, color: 'crimson' } }, formError),
+          R.createElement(
+            'div',
+            { style: { display: 'flex', gap: 8 } },
+            R.createElement(Button, { size: 'sm', onClick: submit, disabled: submitting || !ideacloudId.trim() }, submitting ? 'Generating…' : 'Generate'),
+          ),
+        ),
+      );
     }
 
     // ── Overview (GET /overview) — was Hrizn/Index ───────────────────────────────
@@ -424,7 +582,9 @@ const plugin: PluginModule = {
 
     // ── Content list (GET /content) — was Hrizn/Content ──────────────────────────
     function Content({ nav }: { nav: (v: View) => void }) {
-      const { data, error, loading } = useQuery<{ items: any[] }>('/content');
+      const [reload, setReload] = R.useState(0);
+      const [genOpen, setGenOpen] = R.useState(false);
+      const { data, error, loading } = useQuery<{ items: any[] }>('/content', [reload]);
       const items = data?.items ?? [];
 
       return R.createElement(
@@ -433,9 +593,19 @@ const plugin: PluginModule = {
         R.createElement(PageHeader, {
           title: 'Content Library',
           description: 'All generated articles for this rooftop.',
-          actions: [R.createElement(NavButton, { key: 'home', label: '← HRIZN', onClick: () => nav({ name: 'overview' }) })],
+          actions: [
+            R.createElement(NavButton, { key: 'home', label: '← HRIZN', onClick: () => nav({ name: 'overview' }) }),
+            R.createElement(Button, { key: 'gen', size: 'sm', onClick: () => setGenOpen((v) => !v) }, 'Generate Content'),
+          ],
         }),
         R.createElement(ErrorBanner, { error }),
+        genOpen &&
+          R.createElement(GenerateForm, {
+            onDone: () => {
+              setGenOpen(false);
+              setReload((n) => n + 1);
+            },
+          }),
         R.createElement(
           Card,
           null,
@@ -473,7 +643,16 @@ const plugin: PluginModule = {
                           R.createElement('td', { style: { padding: 12, fontWeight: 500 } }, c.ideacloud?.keyword ?? ARTICLE_TYPE_LABELS[c.article_type] ?? c.article_type),
                           R.createElement('td', { style: { padding: 12, opacity: 0.7 } }, ARTICLE_TYPE_LABELS[c.article_type] ?? c.article_type),
                           R.createElement('td', { style: { padding: 12, opacity: 0.7 } }, c.content_intent ? (INTENT_LABELS[c.content_intent] ?? c.content_intent) : '—'),
-                          R.createElement('td', { style: { padding: 12 } }, R.createElement(StatusBadge, { status: c.status, variant: contentStatusVariant(c.status) })),
+                          R.createElement(
+                            'td',
+                            { style: { padding: 12 } },
+                            R.createElement(
+                              'div',
+                              { style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
+                              R.createElement(StatusBadge, { status: c.status, variant: contentStatusVariant(c.status) }),
+                              R.createElement(ReadyBadge, { status: c.status }),
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -548,6 +727,24 @@ const plugin: PluginModule = {
                     ),
                   ),
                 ),
+                Array.isArray(content.linkedVehicles) &&
+                  content.linkedVehicles.length > 0 &&
+                  R.createElement(
+                    Card,
+                    { 'data-testid': 'hrizn-linked-vehicles' },
+                    R.createElement(CardHeader, null, R.createElement(CardTitle, { style: { fontSize: 14, fontWeight: 500 } }, 'Linked Vehicles')),
+                    R.createElement(
+                      CardContent,
+                      { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
+                      content.linkedVehicles.map((v: any) =>
+                        R.createElement(
+                          Badge,
+                          { key: v.vin, variant: 'secondary', 'data-testid': 'hrizn-linked-vehicle-chip' },
+                          '🔗 ' + [v.year, v.make, v.model].filter((p: any) => p != null && p !== '').join(' '),
+                        ),
+                      ),
+                    ),
+                  ),
                 content.error_message &&
                   R.createElement(
                     Card,
