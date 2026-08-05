@@ -8,14 +8,17 @@ use App\Audit\AuditContext;
 use App\Http\Controllers\Controller;
 use App\Plugins\PluginSettings;
 use App\Support\ApiResponse;
+use App\Support\EntityReferenceService;
 use App\Support\TenantContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Vctrs\Plugins\InventoryHub\InventoryDirectory;
 use Vctrs\Plugins\VbHrizn\Models\HriznContent;
 use Vctrs\Plugins\VbHrizn\Models\HriznIdeacloud;
 use Vctrs\Plugins\VbHrizn\Support\HriznClientFactory;
 use Vctrs\Plugins\VbHrizn\Support\HriznPreconditionException;
+use Vctrs\Plugins\VbHrizn\Support\HriznRelation;
 use Vctrs\Plugins\VbHrizn\Support\HriznResponse;
 
 class ContentController extends Controller
@@ -25,6 +28,9 @@ class ContentController extends Controller
 
     /** Content intents (core router.ts contentIntentEnum). */
     private const CONTENT_INTENTS = ['fixed_ops', 'variable', 'general'];
+
+    /** Article types that describe a specific vehicle and can be VIN-linked. */
+    private const VEHICLE_ARTICLE_TYPES = ['modellanding', 'comparison'];
 
     public function __construct(private readonly HriznClientFactory $clients) {}
 
@@ -116,9 +122,12 @@ class ContentController extends Controller
     {
         $ctx = app(TenantContext::class);
 
-        return HriznResponse::guard(fn () => ApiResponse::success(
-            $this->clients->for($ctx->activeTenantType(), $ctx->activeTenantId())->getContent($id)
-        ));
+        return HriznResponse::guard(function () use ($ctx, $id) {
+            $payload = $this->clients->for($ctx->activeTenantType(), $ctx->activeTenantId())->getContent($id);
+            $payload['linkedVehicles'] = $this->linkedVehiclesFor($ctx, $id);
+
+            return ApiResponse::success($payload);
+        });
     }
 
     /** POST /api/v1/hrizn/content — generate one item (core content.generate). */
@@ -132,6 +141,7 @@ class ContentController extends Controller
             'autoContentTools' => ['sometimes', 'boolean'],
             'title' => ['sometimes', 'string'],
             'contentLength' => ['sometimes', 'integer', 'min:200', 'max:5000'],
+            'vehicleVin' => ['sometimes', 'string', 'max:32'],
         ]);
         $ctx = app(TenantContext::class);
         $settings = app(PluginSettings::class)->resolve('vb-hrizn');
@@ -160,7 +170,8 @@ class ContentController extends Controller
                 'content_length' => $validated['contentLength'] ?? null,
             ]);
 
-            DB::transaction(function () use ($ctx, $validated, $api, $articleType, $contentIntent, $autoCompliance, $autoContentTools) {
+            $content = null;
+            DB::transaction(function () use ($ctx, $validated, $api, $articleType, $contentIntent, $autoCompliance, $autoContentTools, &$content) {
                 AuditContext::tag('hrizn.content.generate');
                 // ideacloud_id is a local uuid PK (schema: FK to hrizn_ideaclouds.id); resolve the
                 // local row from the Hrizn ideacloud id. If no local row exists yet, fall back to
@@ -168,7 +179,7 @@ class ContentController extends Controller
                 // input.ideacloudId into the uuid column, router.ts:695).
                 $ideacloud = HriznIdeacloud::query()
                     ->where('hrizn_id', $validated['ideacloudId'])->first();
-                HriznContent::create([
+                $content = HriznContent::create([
                     'ideacloud_id' => $ideacloud !== null ? $ideacloud->id : $validated['ideacloudId'],
                     'hrizn_content_id' => $api['id'] ?? null,
                     'article_type' => $articleType,
@@ -180,8 +191,79 @@ class ContentController extends Controller
                 ]);
             });
 
+            $this->maybeLinkVehicle($ctx, $content, $articleType, $validated['vehicleVin'] ?? null);
+
             return ApiResponse::success($api);
         });
+    }
+
+    /**
+     * Link a freshly-generated vehicle-specific article to an inventory vehicle by VIN.
+     *
+     * Degrades gracefully: no-ops when inventory-hub is not installed (the seam is
+     * unbound), when the article type is not vehicle-specific, or when the VIN does not
+     * resolve — the content row is already created either way. Any failure is reported,
+     * never surfaced, so a linking hiccup can't fail the generate call.
+     */
+    private function maybeLinkVehicle(TenantContext $ctx, ?HriznContent $content, string $articleType, ?string $vin): void
+    {
+        if ($content === null || $vin === null || trim($vin) === '' || ! in_array($articleType, self::VEHICLE_ARTICLE_TYPES, true)) {
+            return;
+        }
+        if (! app()->bound(InventoryDirectory::class)) {
+            return;
+        }
+        try {
+            $tt = $ctx->activeTenantType();
+            $tid = $ctx->activeTenantId();
+            $vehicle = app(InventoryDirectory::class)->lookupByVin($tt, $tid, $vin);
+            if ($vehicle === null) {
+                return; // unknown VIN — skip link, content already created
+            }
+            app(EntityReferenceService::class)->link(
+                $tt, $tid,
+                HriznRelation::CONTENT_SOURCE_TYPE, (string) $content->id,
+                HriznRelation::VEHICLE_TARGET_TYPE, strtoupper($vin),
+                HriznRelation::COVERS, $ctx->userId(),
+            );
+        } catch (\Throwable $e) {
+            report($e);
+        }
+    }
+
+    /**
+     * Resolve the inventory vehicles a content article covers (by the local row's
+     * entity_references), enriched with the Directory's picker fields. Degrades to []
+     * when the article has no local mirror or inventory-hub is not installed.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function linkedVehiclesFor(TenantContext $ctx, string $externalId): array
+    {
+        try {
+            $local = HriznContent::query()->where('hrizn_content_id', $externalId)->first();
+            if ($local === null || ! app()->bound(InventoryDirectory::class)) {
+                return [];
+            }
+            $tt = $ctx->activeTenantType();
+            $tid = $ctx->activeTenantId();
+            $refs = app(EntityReferenceService::class)->forSource($tt, $tid, HriznRelation::CONTENT_SOURCE_TYPE, (string) $local->id);
+            $dir = app(InventoryDirectory::class);
+            $out = [];
+            foreach ($refs as $ref) {
+                if (($ref['target_type'] ?? null) !== HriznRelation::VEHICLE_TARGET_TYPE) {
+                    continue;
+                }
+                $v = $dir->lookupByVin($tt, $tid, (string) $ref['target_id']);
+                $out[] = $v ?? ['vin' => $ref['target_id']];
+            }
+
+            return $out;
+        } catch (\Throwable $e) {
+            report($e);
+
+            return [];
+        }
     }
 
     /** POST /api/v1/hrizn/content/batch — up to 10 items (core content.generateBatch). */
