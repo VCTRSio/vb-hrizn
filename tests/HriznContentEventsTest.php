@@ -5,7 +5,6 @@ declare(strict_types=1);
 use App\Events\FeedEventRequested;
 use App\Events\TaskRequested;
 use App\Models\PluginNamespace;
-use App\Support\TenantContext;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use Vctrs\Plugins\VbHrizn\Models\HriznContent;

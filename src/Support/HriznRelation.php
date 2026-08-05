@@ -15,7 +15,9 @@ final class HriznRelation
 
     /** EntityReference source/target types. */
     public const CONTENT_SOURCE_TYPE = 'vb-hrizn.content';
+
     public const IDEACLOUD_SOURCE_TYPE = 'vb-hrizn.ideacloud';
+
     public const VEHICLE_TARGET_TYPE = 'inventory_vehicle';
 
     /** Relation verb: a content piece covers a specific vehicle. */
@@ -23,7 +25,9 @@ final class HriznRelation
 
     /** Feed event types. */
     public const FEED_CONTENT_READY = 'hrizn.content.ready';
+
     public const FEED_CONTENT_FAILED = 'hrizn.content.failed';
+
     public const FEED_RESEARCH_READY = 'hrizn.ideacloud.ready';
 
     /** Human labels for the 7 article types (display only, not validation). */

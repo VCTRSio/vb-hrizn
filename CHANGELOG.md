@@ -2,6 +2,30 @@
 
 All notable changes to HRIZN are documented here.
 
+## [1.1.0] - 2026-08-05
+
+### Added
+- Content-lifecycle events: when the HRIZN platform finishes an article, a feed
+  event is raised and a "review & publish" task is created and assigned to the
+  staff member who requested the article; a high-priority feed event is raised
+  on content-generation failure; a "research ready" feed event is raised when an
+  IdeaCloud completes.
+- Content↔vehicle linking: `modellanding`/`comparison` articles can be linked to
+  an inventory vehicle by VIN at generation time; linked vehicles surface on
+  content detail (`linkedVehicles`).
+- `HriznDirectory` — a PII-free, per-rooftop content-health seam (`contentHealth`,
+  `contentFor`) for cross-plugin/manager consumption.
+- Content UI: an optional vehicle picker for vehicle-specific article types,
+  "Ready to publish" and linked-vehicle badges, and a
+  `GET /api/v1/hrizn/vehicles/search` passthrough to the inventory directory.
+
+### Notes
+- All new cross-cutting effects are best-effort and degrade gracefully when
+  inventory-hub is not installed. Zero core changes.
+- Intelligence-recommendation events were evaluated and deferred: HRIZN has no
+  recommendation webhook and no local mirror, so proactive rec-events would
+  require added delta-detection state.
+
 ## [1.0.0] - 2026-07-14
 
 ### Added

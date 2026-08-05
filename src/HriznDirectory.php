@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Vctrs\Plugins\VbHrizn;
 
 use App\Support\SystemContext;
+use Illuminate\Support\Carbon;
 use Vctrs\Plugins\VbHrizn\Models\HriznContent;
 use Vctrs\Plugins\VbHrizn\Models\HriznIdeacloud;
 
@@ -25,7 +26,7 @@ class HriznDirectory
 
             $lastPublish = (clone $content())->where('status', 'complete')->max('updated_at');
             $days = $lastPublish !== null
-                ? (int) now()->startOfDay()->diffInDays(\Illuminate\Support\Carbon::parse($lastPublish)->startOfDay())
+                ? (int) now()->startOfDay()->diffInDays(Carbon::parse($lastPublish)->startOfDay())
                 : null;
 
             return [
