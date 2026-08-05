@@ -4,15 +4,19 @@ declare(strict_types=1);
 
 namespace Vctrs\Plugins\VbHrizn\Http\Controllers;
 
+use App\Events\FeedEventRequested;
+use App\Events\TaskRequested;
 use App\Http\Controllers\Controller;
 use App\Models\PluginNamespace;
 use App\Support\SystemContext;
+use App\Support\TenantContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Vctrs\Plugins\VbHrizn\Models\HriznContent;
 use Vctrs\Plugins\VbHrizn\Models\HriznIdeacloud;
 use Vctrs\Plugins\VbHrizn\Support\HriznNamespace;
+use Vctrs\Plugins\VbHrizn\Support\HriznRelation;
 use Vctrs\Plugins\VbHrizn\Support\HriznWebhookSignature;
 
 /**
@@ -81,7 +85,7 @@ class WebhookController extends Controller
     private function dispatch(string $type, array $data): void
     {
         $rows = match ($type) {
-            'ideacloud.completed' => $this->setIdeacloudStatus($data, 'complete'),
+            'ideacloud.completed' => $this->onIdeacloudCompleted($data),
             'ideacloud.failed' => $this->setIdeacloudStatus($data, 'failed'),
             'content.progress' => $this->onContentProgress($data),
             'content.completed' => $this->onContentCompleted($data),
@@ -110,6 +114,38 @@ class WebhookController extends Controller
     }
 
     /** @param array<string, mixed> $data */
+    private function onIdeacloudCompleted(array $data): int
+    {
+        $hriznId = $data['ideacloud_id'] ?? null;
+        if (! is_string($hriznId) || $hriznId === '') {
+            return 0;
+        }
+        $ic = HriznIdeacloud::query()->where('hrizn_id', $hriznId)->first();
+        if ($ic === null) {
+            return 0;
+        }
+        $wasComplete = $ic->status === 'complete';
+        $ic->update(['status' => 'complete']);
+
+        if (! $wasComplete) {
+            try {
+                event(new FeedEventRequested(
+                    tenantType: (string) $ic->tenant_type, tenantId: (string) $ic->tenant_id,
+                    actorType: 'system', actorId: TenantContext::SYSTEM_ACTOR,
+                    sourceType: HriznRelation::IDEACLOUD_SOURCE_TYPE, sourceId: (string) $ic->id,
+                    pluginNamespace: HriznRelation::PLUGIN_NAMESPACE,
+                    eventType: HriznRelation::FEED_RESEARCH_READY,
+                    summary: "Keyword research ready: {$ic->keyword}",
+                ));
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        }
+
+        return 1;
+    }
+
+    /** @param array<string, mixed> $data */
     private function onContentProgress(array $data): int
     {
         $id = $data['article_id'] ?? null;
@@ -128,26 +164,90 @@ class WebhookController extends Controller
     private function onContentCompleted(array $data): int
     {
         $id = $data['article_id'] ?? null;
-        if (is_string($id) && $id !== '') {
-            return HriznContent::query()->where('hrizn_content_id', $id)->update([
-                'status' => 'complete', 'progress_percent' => 100, 'progress_stage' => 'finalizing',
-            ]);
+        if (! is_string($id) || $id === '') {
+            return 0;
+        }
+        $content = HriznContent::query()->where('hrizn_content_id', $id)->first();
+        if ($content === null) {
+            return 0;
+        }
+        $alreadyComplete = $content->status === 'complete';
+        $content->update(['status' => 'complete', 'progress_percent' => 100, 'progress_stage' => 'finalizing']);
+
+        if (! $alreadyComplete) {
+            $this->emitContentReady($content);
         }
 
-        return 0;
+        return 1;
+    }
+
+    private function emitContentReady(HriznContent $content): void
+    {
+        try {
+            $keyword = $content->ideacloud?->keyword ?? 'content';
+            $label = HriznRelation::articleLabel((string) $content->article_type);
+            $tt = (string) $content->tenant_type;
+            $tid = (string) $content->tenant_id;
+
+            event(new FeedEventRequested(
+                tenantType: $tt, tenantId: $tid,
+                actorType: 'system', actorId: TenantContext::SYSTEM_ACTOR,
+                sourceType: HriznRelation::CONTENT_SOURCE_TYPE, sourceId: (string) $content->id,
+                pluginNamespace: HriznRelation::PLUGIN_NAMESPACE,
+                eventType: HriznRelation::FEED_CONTENT_READY,
+                summary: "New HRIZN {$label} ready to review: {$keyword}",
+                detailPayload: ['article_type' => $content->article_type, 'content_intent' => $content->content_intent],
+            ));
+
+            $requester = (string) ($content->created_by ?? TenantContext::SYSTEM_ACTOR);
+            event(new TaskRequested(
+                pluginNamespace: HriznRelation::PLUGIN_NAMESPACE,
+                tenantType: $tt, tenantId: $tid,
+                requestedBy: $requester,
+                title: "Review & publish HRIZN {$label}: {$keyword}",
+                description: "A HRIZN {$label} ({$content->content_intent}) finished generating and is ready to review and publish.",
+                priority: 'normal',
+                assignedTo: $content->created_by !== null ? (string) $content->created_by : null,
+            ));
+        } catch (\Throwable $e) {
+            report($e);
+        }
     }
 
     /** @param array<string, mixed> $data */
     private function onContentFailed(array $data): int
     {
         $id = $data['article_id'] ?? null;
-        if (is_string($id) && $id !== '') {
-            return HriznContent::query()->where('hrizn_content_id', $id)->update([
-                'status' => 'failed', 'error_message' => $data['error'] ?? null,
-            ]);
+        if (! is_string($id) || $id === '') {
+            return 0;
+        }
+        $content = HriznContent::query()->where('hrizn_content_id', $id)->first();
+        if ($content === null) {
+            return 0;
+        }
+        $wasFailed = $content->status === 'failed';
+        $content->update(['status' => 'failed', 'error_message' => $data['error'] ?? null]);
+
+        if (! $wasFailed) {
+            try {
+                $keyword = $content->ideacloud?->keyword ?? 'content';
+                $label = HriznRelation::articleLabel((string) $content->article_type);
+                event(new FeedEventRequested(
+                    tenantType: (string) $content->tenant_type, tenantId: (string) $content->tenant_id,
+                    actorType: 'system', actorId: TenantContext::SYSTEM_ACTOR,
+                    sourceType: HriznRelation::CONTENT_SOURCE_TYPE, sourceId: (string) $content->id,
+                    pluginNamespace: HriznRelation::PLUGIN_NAMESPACE,
+                    eventType: HriznRelation::FEED_CONTENT_FAILED,
+                    summary: "HRIZN {$label} generation failed: {$keyword}",
+                    priority: 'high',
+                    detailPayload: ['error' => (string) ($data['error'] ?? '')],
+                ));
+            } catch (\Throwable $e) {
+                report($e);
+            }
         }
 
-        return 0;
+        return 1;
     }
 
     /** @param array<string, mixed> $data */
