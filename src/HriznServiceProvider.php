@@ -24,6 +24,7 @@ class HriznServiceProvider implements PluginModule
         Route::group([], $this->dir.'/src/routes.php');
 
         app()->singleton(HriznClientFactory::class);
+        app()->singleton(\Vctrs\Plugins\VbHrizn\HriznDirectory::class);
 
         AuditableRegistry::register(HriznIdeacloud::class);
         AuditableRegistry::register(HriznContent::class);
