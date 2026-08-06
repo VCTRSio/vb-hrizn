@@ -40,7 +40,7 @@ it('aggregates content health for the tenant', function () {
         ->and($h['pendingContent'])->toBe(1)
         ->and($h['fixedOpsCount'])->toBe(1)
         ->and($h['variableCount'])->toBe(1)
-        ->and($h['complianceFlagged'])->toBe(1)
+        ->and($h['complianceNeedsAttention'])->toBe(1)
         ->and($h['ideacloudsActive'])->toBe(1)
         ->and($h['daysSinceLastPublish'])->toBe(0);
 });

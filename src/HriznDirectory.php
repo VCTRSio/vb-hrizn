@@ -16,7 +16,16 @@ use Vctrs\Plugins\VbHrizn\Models\HriznIdeacloud;
  */
 class HriznDirectory
 {
-    /** @return array<string, int|null> */
+    /**
+     * Per-rooftop content-health roll-up.
+     *
+     * Note on `complianceNeedsAttention`: this counts rows that need a human to look
+     * at them — those still awaiting verification (`pending`) AND those that failed
+     * (`flagged`/`fail`) — NOT strictly compliance failures. Read it as "needs
+     * attention", not "failed", or the pending rows will be misattributed as failures.
+     *
+     * @return array<string, int|null>
+     */
     public function contentHealth(string $tenantType, string $tenantId): array
     {
         return SystemContext::runAsTenant($tenantType, $tenantId, function () use ($tenantType, $tenantId): array {
@@ -36,7 +45,8 @@ class HriznDirectory
                 'pendingContent' => (clone $content())->whereIn('status', ['pending', 'generating'])->count(),
                 'fixedOpsCount' => (clone $content())->where('status', 'complete')->where('content_intent', 'fixed_ops')->count(),
                 'variableCount' => (clone $content())->where('status', 'complete')->where('content_intent', 'variable')->count(),
-                'complianceFlagged' => (clone $content())->whereIn('compliance_status', ['flagged', 'fail', 'pending'])->count(),
+                // Rows needing attention: not-yet-verified (pending) OR failed (flagged/fail).
+                'complianceNeedsAttention' => (clone $content())->whereIn('compliance_status', ['flagged', 'fail', 'pending'])->count(),
                 'ideacloudsActive' => HriznIdeacloud::withoutTenantScope()
                     ->where('tenant_type', $tenantType)->where('tenant_id', $tenantId)
                     ->whereNull('deleted_at')->count(),

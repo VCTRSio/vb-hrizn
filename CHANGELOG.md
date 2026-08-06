@@ -2,6 +2,19 @@
 
 All notable changes to HRIZN are documented here.
 
+## [1.1.1] - 2026-08-05
+
+### Changed
+- `HriznDirectory::contentHealth` — renamed the `complianceFlagged` result key to
+  `complianceNeedsAttention` to remove an ambiguity: the bucket counts rows needing
+  a human look (`pending` awaiting verification OR `flagged`/`fail`), not strictly
+  compliance failures. Added a doc-comment on the method spelling this out. This
+  seam is new in 1.1.0 with no external consumers yet, so the key was renamed rather
+  than left misleading.
+- Strengthened the content↔vehicle link test to assert the persisted
+  `entity_references` edge directly (`source_id` equals the local content id, plus
+  `source_type`/`relation`/`target`), not only via the `linkedVehicles` round-trip.
+
 ## [1.1.0] - 2026-08-05
 
 ### Added
