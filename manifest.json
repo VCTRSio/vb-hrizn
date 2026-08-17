@@ -45,7 +45,7 @@
         "group": "Integration",
         "type": "string",
         "default": "",
-        "help": "Public HTTPS URL the Hrizn platform posts lifecycle events to. Leave blank to pass it per-call when registering."
+        "help": "Optional origin override (scheme://host[:port]) for the inbound webhook callback URL. Only the origin is used — the path is always core's /api/webhooks/inbound/{slug}. Leave blank to derive the origin from the app URL."
       },
       {
         "key": "defaultArticleType",
