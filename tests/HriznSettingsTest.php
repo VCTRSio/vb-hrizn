@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\WebhookEndpoint;
 use Illuminate\Support\Facades\Http;
 use Vctrs\Plugins\VbHrizn\Support\HriznNamespace;
 
@@ -77,11 +78,15 @@ it('setApiKey surfaces a 401 from the API as a 401 (invalid key)', function () {
         ->assertStatus(401);
 });
 
-it('removeApiKey clears the stored key', function () {
+it('removeApiKey clears the key and deactivates the tenant webhook endpoint', function () {
     HriznNamespace::patch('rooftop', PLUGIN_TEST_TENANT, ['apiKey' => 'hzk_a']);
+    WebhookEndpoint::provision('rooftop', PLUGIN_TEST_TENANT, 'vb-hrizn');
+
     $this->actingAs(pluginTestUser('rooftop_owner'))
         ->deleteJson('/api/v1/hrizn/settings/api-key')->assertOk()->assertJson(['data' => ['success' => true]]);
+
     expect(HriznNamespace::get('rooftop', PLUGIN_TEST_TENANT))->toBe([]);
+    expect(WebhookEndpoint::query()->where('routing_key', 'vb-hrizn')->firstOrFail()->status)->toBe('inactive');
 });
 
 it('getSiteInfo returns 412 when no API key is configured', function () {

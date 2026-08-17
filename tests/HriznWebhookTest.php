@@ -23,12 +23,11 @@ beforeEach(function () {
     hzInstallSignedAndBoot(hzBindTenant(pluginTestUser('rooftop_owner')->id));
 });
 
-it('registerWebhook creates a Hrizn webhook and stores its id + secret', function () {
+it('registerWebhook provisions a WebhookEndpoint, stores the SaaS secret on it, keeps webhookId in the namespace', function () {
     HriznNamespace::patch('rooftop', PLUGIN_TEST_TENANT, ['apiKey' => 'hzk_ok']);
-    // Provide a callback URL via the settings cascade (slug is now vb-hrizn).
     app()->instance(TenantContext::class, new TenantContext('u', 'rooftop', PLUGIN_TEST_TENANT, ''));
     app(PluginSettings::class)->setOverride('vb-hrizn', 'rooftop', PLUGIN_TEST_TENANT, [
-        'webhookCallbackUrl' => 'https://hooks.example.com/integrations/hrizn/webhook/TOKEN',
+        'webhookCallbackUrl' => 'https://hooks.example.com/legacy/path',
     ]);
     app()->forgetInstance(PluginSettings::class);
 
@@ -40,15 +39,34 @@ it('registerWebhook creates a Hrizn webhook and stores its id + secret', functio
         ->postJson('/api/v1/hrizn/settings/webhook')
         ->assertOk()->assertJson(['data' => ['success' => true, 'webhookId' => 'wh_1']]);
 
+    $ep = WebhookEndpoint::query()->where('routing_key', 'vb-hrizn')->firstOrFail();
+    expect($ep->status)->toBe('active')
+        ->and($ep->secrets['signing_secret'])->toBe('whsec_live')
+        ->and($ep->slug)->not->toBeEmpty();
+
     $ns = HriznNamespace::get('rooftop', PLUGIN_TEST_TENANT);
-    expect($ns['webhookId'])->toBe('wh_1')->and($ns['webhookSecret'])->toBe('whsec_live')
-        ->and($ns['webhookRegisteredAt'])->not->toBeNull();
+    expect($ns['webhookId'])->toBe('wh_1')
+        ->and($ns['webhookRegisteredAt'])->not->toBeNull()
+        ->and($ns['webhookSecret'] ?? null)->toBeNull();
+
+    Http::assertSent(fn ($req) => $req->url() === 'https://api.app.hrizn.io/v1/public/webhooks'
+        && str_starts_with($req['url'], 'https://hooks.example.com/api/webhooks/inbound/')
+        && str_contains($req['url'], $ep->slug));
 });
 
-it('registerWebhook is a 412 when no callback URL is configured', function () {
+it('registerWebhook derives the callback origin from app.url when no override is set', function () {
+    config(['app.url' => 'https://app.example.com']);
     HriznNamespace::patch('rooftop', PLUGIN_TEST_TENANT, ['apiKey' => 'hzk_ok']);
-    Http::fake();
-    $this->actingAs(pluginTestUser('rooftop_owner'))->postJson('/api/v1/hrizn/settings/webhook')->assertStatus(412);
+
+    Http::fake(['api.app.hrizn.io/v1/public/webhooks' => Http::response([
+        'data' => ['id' => 'wh_2', 'secret' => 'whsec_x'],
+    ])]);
+
+    $this->actingAs(pluginTestUser('rooftop_owner'))->postJson('/api/v1/hrizn/settings/webhook')->assertOk();
+
+    $ep = WebhookEndpoint::query()->where('routing_key', 'vb-hrizn')->firstOrFail();
+    Http::assertSent(fn ($req) => str_starts_with($req['url'], 'https://app.example.com/api/webhooks/inbound/')
+        && str_contains($req['url'], $ep->slug));
 });
 
 /** Provision this tenant's core WebhookEndpoint; return [slug, signingSecret]. */

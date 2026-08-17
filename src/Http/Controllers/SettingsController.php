@@ -6,6 +6,7 @@ namespace Vctrs\Plugins\VbHrizn\Http\Controllers;
 
 use App\Audit\AuditContext;
 use App\Http\Controllers\Controller;
+use App\Models\WebhookEndpoint;
 use App\Plugins\PluginSettings;
 use App\Support\ApiResponse;
 use App\Support\OutboundUrl;
@@ -79,6 +80,7 @@ class SettingsController extends Controller
         $ctx = app(TenantContext::class);
         DB::transaction(function () use ($ctx) {
             HriznNamespace::clear($ctx->activeTenantType(), $ctx->activeTenantId());
+            WebhookEndpoint::query()->where('routing_key', 'vb-hrizn')->update(['status' => 'inactive']);
             AuditContext::tag('hrizn.settings.removeApiKey');
         });
 
@@ -98,23 +100,37 @@ class SettingsController extends Controller
     /** POST /api/v1/hrizn/settings/webhook — register the inbound webhook (core registerWebhook). */
     public function registerWebhook(Request $request): JsonResponse
     {
-        $validated = $request->validate(['callbackUrl' => ['sometimes', 'string', 'url']]);
+        $request->validate(['callbackUrl' => ['sometimes', 'string', 'url']]);
         $ctx = app(TenantContext::class);
+        $tt = $ctx->activeTenantType();
+        $tid = $ctx->activeTenantId();
 
-        // Prefer the manifest-cascaded webhookCallbackUrl over the per-call input (core:289-295).
+        // Optional origin override (reverse-proxy/tunnel): scheme+host[:port] only —
+        // the path + slug always come from core's inbound route so routing can't break.
         $settings = app(PluginSettings::class)->resolve('vb-hrizn');
         $settingUrl = is_string($settings['webhookCallbackUrl'] ?? null) && $settings['webhookCallbackUrl'] !== ''
-            ? $settings['webhookCallbackUrl'] : null;
-        $callbackUrl = $settingUrl ?? ($validated['callbackUrl'] ?? null);
-        if ($callbackUrl === null) {
-            return ApiResponse::error('No webhook callback URL configured. Set the webhookCallbackUrl setting or pass callbackUrl.', 412);
-        }
+            ? $settings['webhookCallbackUrl'] : ($request->input('callbackUrl') ?: null);
 
-        return HriznResponse::guard(function () use ($ctx, $callbackUrl) {
-            $client = $this->clients->for($ctx->activeTenantType(), $ctx->activeTenantId());
-            $ns = HriznNamespace::get($ctx->activeTenantType(), $ctx->activeTenantId());
+        return HriznResponse::guard(function () use ($tt, $tid, $settingUrl) {
+            // Fetch-or-provision this tenant's inbound endpoint (one, keyed by routing_key).
+            $endpoint = WebhookEndpoint::query()->where('routing_key', 'vb-hrizn')->where('status', 'active')->first()
+                ?? WebhookEndpoint::provision($tt, $tid, 'vb-hrizn');
 
-            // Replace an existing webhook (best-effort, core:305-307).
+            $path = route('webhooks.inbound', ['slug' => $endpoint->slug], absolute: false);
+            $origin = null;
+            if ($settingUrl !== null) {
+                $u = parse_url($settingUrl);
+                if (isset($u['scheme'], $u['host'])) {
+                    $origin = $u['scheme'].'://'.$u['host'].(isset($u['port']) ? ':'.$u['port'] : '');
+                }
+            }
+            $origin ??= rtrim((string) config('app.url'), '/');
+            $callbackUrl = OutboundUrl::assertSafe($origin.$path);
+
+            $client = $this->clients->for($tt, $tid);
+            $ns = HriznNamespace::get($tt, $tid);
+
+            // Replace an existing SaaS webhook (best-effort).
             if (is_string($ns['webhookId'] ?? null) && $ns['webhookId'] !== '') {
                 try {
                     $client->deleteWebhook($ns['webhookId']);
@@ -124,16 +140,18 @@ class SettingsController extends Controller
             }
 
             $webhook = $client->createWebhook([
-                'url' => OutboundUrl::assertSafe($callbackUrl),
+                'url' => $callbackUrl,
                 'events' => [
                     'ideacloud.completed', 'ideacloud.failed', 'content.progress',
                     'content.completed', 'content.failed', 'compliance.completed', 'content_tools.completed',
                 ],
             ]);
 
-            HriznNamespace::patch($ctx->activeTenantType(), $ctx->activeTenantId(), [
+            // The SaaS owns the signing secret — persist it ONTO the endpoint (encrypted
+            // by the cast), NOT in the plugin namespace. Keep webhookId for delete/test.
+            $endpoint->update(['secrets' => ['signing_secret' => (string) ($webhook['secret'] ?? '')]]);
+            HriznNamespace::patch($tt, $tid, [
                 'webhookId' => $webhook['id'] ?? null,
-                'webhookSecret' => $webhook['secret'] ?? null,
                 'webhookRegisteredAt' => now()->toIso8601String(),
             ]);
 
