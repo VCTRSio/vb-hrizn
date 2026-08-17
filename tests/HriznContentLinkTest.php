@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Models\EntityReference;
+use App\Support\EntityRelation;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Vctrs\Plugins\VbHrizn\Models\HriznContent;
@@ -64,11 +65,11 @@ it('links content to a vehicle by VIN for a modellanding article', function () {
         ->where('source_type', HriznRelation::CONTENT_SOURCE_TYPE)
         ->where('target_type', HriznRelation::VEHICLE_TARGET_TYPE)
         ->where('target_id', '1HGCM82633A004352')
-        ->where('relation', HriznRelation::COVERS)->first();
+        ->where('relation', EntityRelation::COVERS)->first();
     expect($ref)->not->toBeNull()
         ->and($ref->source_id)->toBe((string) $content->id)
         ->and($ref->source_type)->toBe(HriznRelation::CONTENT_SOURCE_TYPE)
-        ->and($ref->relation)->toBe(HriznRelation::COVERS)
+        ->and($ref->relation)->toBe(EntityRelation::COVERS)
         ->and($ref->target_type)->toBe(HriznRelation::VEHICLE_TARGET_TYPE)
         ->and($ref->target_id)->toBe('1HGCM82633A004352');
 });

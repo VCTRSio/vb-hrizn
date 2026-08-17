@@ -9,7 +9,6 @@ use Vctrs\Plugins\VbHrizn\Http\Controllers\IntelligenceController;
 use Vctrs\Plugins\VbHrizn\Http\Controllers\OverviewController;
 use Vctrs\Plugins\VbHrizn\Http\Controllers\SettingsController;
 use Vctrs\Plugins\VbHrizn\Http\Controllers\VehicleSearchController;
-use Vctrs\Plugins\VbHrizn\Http\Controllers\WebhookController;
 
 // ── Session-authed /api/v1/hrizn/* (extracted-plugin browser surface) ─────────
 Route::middleware(['web', 'session-api'])->prefix('api/v1/hrizn')->name('hrizn.api.')->group(function () {
@@ -46,9 +45,3 @@ Route::middleware(['web', 'session-api'])->prefix('api/v1/hrizn')->name('hrizn.a
     Route::post('/settings/webhook', [SettingsController::class, 'registerWebhook'])->middleware('can:hrizn.settings.write.rooftop')->name('settings.registerWebhook');
     Route::post('/settings/webhook/test', [SettingsController::class, 'testWebhook'])->middleware('can:hrizn.settings.write.rooftop')->name('settings.testWebhook');
 });
-
-// ── Public inbound Hrizn webhook receiver (NO auth/tenant; HMAC-verified) ──────
-Route::middleware('api')
-    ->post('/integrations/hrizn/webhook/{token}', [WebhookController::class, 'receive'])
-    ->where('token', '[0-9a-f-]{36}')
-    ->name('hrizn.webhook.receive');

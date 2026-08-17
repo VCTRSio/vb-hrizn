@@ -75,11 +75,16 @@ reproduced standalone.
    consume it. Extracted plugins deliver their React via client-fetch only — they
    leave the core Vite build — so this API is the plugin's single data path.
 
-3. **Public HMAC webhook receiver + encrypted secret store.** The HRIZN platform
-   posts lifecycle events (IdeaCloud/content completion) to a **public** webhook
-   endpoint (`WebhookController`) that is authenticated by an HMAC signature
-   (`HriznWebhookSignature`) rather than a session. The plugin's API key and webhook
-   secret are held in a per-tenant **encrypted** settings store, never in plaintext.
+3. **Inbound webhooks on core's Integration Fabric.** The HRIZN platform posts
+   lifecycle events (IdeaCloud/content completion) to core's **public** ingress
+   (`POST /api/webhooks/inbound/{slug}` → `InboundWebhookManager`), which resolves the
+   tenant from an opaque per-tenant `WebhookEndpoint` slug, verifies the HMAC over the
+   raw body (`HmacSha256Verifier`), enforces freshness, and dedupes replays before
+   firing `InboundWebhookReceived` inside the tenant scope; the plugin's
+   `HandleInboundWebhook` listener runs the lifecycle handlers and records each
+   dispatch as a core `IntegrationRun`. The webhook **signing secret** is held on the
+   core `WebhookEndpoint` (encrypted at rest); the plugin's **API key** is held in a
+   per-tenant **encrypted** namespace store, never in plaintext.
 
 ## Migrations & upgrades
 

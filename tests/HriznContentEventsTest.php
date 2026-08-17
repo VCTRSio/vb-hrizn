@@ -4,12 +4,11 @@ declare(strict_types=1);
 
 use App\Events\FeedEventRequested;
 use App\Events\TaskRequested;
-use App\Models\PluginNamespace;
+use App\Models\WebhookEndpoint;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use Vctrs\Plugins\VbHrizn\Models\HriznContent;
 use Vctrs\Plugins\VbHrizn\Models\HriznIdeacloud;
-use Vctrs\Plugins\VbHrizn\Support\HriznNamespace;
 
 require_once __DIR__.'/hz_bootstrap.php';
 
@@ -17,19 +16,20 @@ beforeEach(function () {
     hzInstallSignedAndBoot(hzBindTenant(pluginTestUser('rooftop_owner')->id));
 });
 
-function hzEvSeedToken(string $secret = 'whsec_ev'): string
+/** Provision this tenant's core WebhookEndpoint; return [slug, signingSecret]. */
+function hzEvProvisionEndpoint(): array
 {
-    HriznNamespace::patch('rooftop', PLUGIN_TEST_TENANT, ['apiKey' => 'hzk_ok', 'webhookSecret' => $secret]);
+    $ep = WebhookEndpoint::provision('rooftop', PLUGIN_TEST_TENANT, 'vb-hrizn');
 
-    return (string) PluginNamespace::query()->where('namespace', 'vb-hrizn:'.PLUGIN_TEST_TENANT)->value('id');
+    return [$ep->slug, $ep->secrets['signing_secret']];
 }
 
-function hzEvPost($test, string $token, array $envelope, string $secret = 'whsec_ev')
+function hzEvPost($test, string $slug, array $envelope, string $secret)
 {
     $raw = json_encode($envelope);
     $sig = 'sha256='.hash_hmac('sha256', $raw, $secret);
 
-    return $test->call('POST', "/integrations/hrizn/webhook/{$token}", [], [], [],
+    return $test->call('POST', "/api/webhooks/inbound/{$slug}", [], [], [],
         ['HTTP_X-Webhook-Signature' => $sig, 'CONTENT_TYPE' => 'application/json'], $raw);
 }
 
@@ -52,9 +52,9 @@ it('fires a feed event + a task assigned to the requester when content completes
     Event::fake([FeedEventRequested::class, TaskRequested::class]);
     $creator = (string) Str::uuid();
     $content = hzEvContent('art_ok', 'generating', 'modellanding', $creator);
-    $token = hzEvSeedToken();
+    [$slug, $secret] = hzEvProvisionEndpoint();
 
-    hzEvPost($this, $token, ['type' => 'content.completed', 'data' => ['article_id' => 'art_ok']])->assertOk();
+    hzEvPost($this, $slug, ['type' => 'content.completed', 'data' => ['article_id' => 'art_ok']], $secret)->assertStatus(202);
 
     expect($content->refresh()->status)->toBe('complete');
     Event::assertDispatched(FeedEventRequested::class, fn ($e) => $e->eventType === 'hrizn.content.ready'
@@ -68,9 +68,9 @@ it('fires a feed event + a task assigned to the requester when content completes
 it('fires a high-priority feed event (no task) when content fails', function () {
     Event::fake([FeedEventRequested::class, TaskRequested::class]);
     hzEvContent('art_bad', 'generating');
-    $token = hzEvSeedToken();
+    [$slug, $secret] = hzEvProvisionEndpoint();
 
-    hzEvPost($this, $token, ['type' => 'content.failed', 'data' => ['article_id' => 'art_bad', 'error' => 'boom']])->assertOk();
+    hzEvPost($this, $slug, ['type' => 'content.failed', 'data' => ['article_id' => 'art_bad', 'error' => 'boom']], $secret)->assertStatus(202);
 
     Event::assertDispatched(FeedEventRequested::class, fn ($e) => $e->eventType === 'hrizn.content.failed' && $e->priority === 'high');
     Event::assertNotDispatched(TaskRequested::class);
@@ -82,9 +82,9 @@ it('fires a research-ready feed event when an ideacloud completes', function () 
         'tenant_type' => 'rooftop', 'tenant_id' => PLUGIN_TEST_TENANT, 'keyword' => 'oil change',
         'status' => 'researching', 'hrizn_id' => 'ic_r', 'created_by' => (string) Str::uuid(),
     ]);
-    $token = hzEvSeedToken();
+    [$slug, $secret] = hzEvProvisionEndpoint();
 
-    hzEvPost($this, $token, ['type' => 'ideacloud.completed', 'data' => ['ideacloud_id' => 'ic_r']])->assertOk();
+    hzEvPost($this, $slug, ['type' => 'ideacloud.completed', 'data' => ['ideacloud_id' => 'ic_r']], $secret)->assertStatus(202);
 
     Event::assertDispatched(FeedEventRequested::class, fn ($e) => $e->eventType === 'hrizn.ideacloud.ready'
         && str_contains($e->summary, 'oil change'));
@@ -92,20 +92,20 @@ it('fires a research-ready feed event when an ideacloud completes', function () 
 
 it('does not fire on re-delivery of an already-complete content webhook (idempotent)', function () {
     $content = hzEvContent('art_dup', 'complete');
-    $token = hzEvSeedToken();
+    [$slug, $secret] = hzEvProvisionEndpoint();
     Event::fake([FeedEventRequested::class, TaskRequested::class]);
 
-    hzEvPost($this, $token, ['type' => 'content.completed', 'data' => ['article_id' => 'art_dup']])->assertOk();
+    hzEvPost($this, $slug, ['type' => 'content.completed', 'data' => ['article_id' => 'art_dup']], $secret)->assertStatus(202);
 
     Event::assertNotDispatched(FeedEventRequested::class);
     Event::assertNotDispatched(TaskRequested::class);
 });
 
-it('fires nothing and still 200s when the content id is unknown', function () {
-    $token = hzEvSeedToken();
+it('fires nothing and still 202s when the content id is unknown', function () {
+    [$slug, $secret] = hzEvProvisionEndpoint();
     Event::fake([FeedEventRequested::class, TaskRequested::class]);
 
-    hzEvPost($this, $token, ['type' => 'content.completed', 'data' => ['article_id' => 'nope']])->assertOk();
+    hzEvPost($this, $slug, ['type' => 'content.completed', 'data' => ['article_id' => 'nope']], $secret)->assertStatus(202);
 
     Event::assertNotDispatched(FeedEventRequested::class);
     Event::assertNotDispatched(TaskRequested::class);

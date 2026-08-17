@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace Vctrs\Plugins\VbHrizn\Support;
 
 /**
- * Plugin-local relation & event vocabulary. Core does not validate the relation
- * string on EntityReferenceService::link(), so the plugin owns these consts —
- * keeping cross-plugin linking and feed/task emission zero-core.
+ * Plugin-local type & event vocabulary. The cross-plugin relation VERB now comes
+ * from core (App\Support\EntityRelation::COVERS); what remains here is the
+ * EntityReference source/target TYPE strings, the feed event types, and the article
+ * labels — none of which have a core registry. Core does not validate the relation
+ * string on EntityReferenceService::link(), so these stay plugin-owned.
  */
 final class HriznRelation
 {
@@ -19,9 +21,6 @@ final class HriznRelation
     public const IDEACLOUD_SOURCE_TYPE = 'vb-hrizn.ideacloud';
 
     public const VEHICLE_TARGET_TYPE = 'inventory_vehicle';
-
-    /** Relation verb: a content piece covers a specific vehicle. */
-    public const COVERS = 'covers';
 
     /** Feed event types. */
     public const FEED_CONTENT_READY = 'hrizn.content.ready';

@@ -9,6 +9,7 @@ use App\Http\Controllers\Controller;
 use App\Plugins\PluginSettings;
 use App\Support\ApiResponse;
 use App\Support\EntityReferenceService;
+use App\Support\EntityRelation;
 use App\Support\TenantContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -224,7 +225,7 @@ class ContentController extends Controller
                 $tt, $tid,
                 HriznRelation::CONTENT_SOURCE_TYPE, (string) $content->id,
                 HriznRelation::VEHICLE_TARGET_TYPE, strtoupper($vin),
-                HriznRelation::COVERS, $ctx->userId(),
+                EntityRelation::COVERS, $ctx->userId(),
             );
         } catch (\Throwable $e) {
             report($e);
