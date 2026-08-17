@@ -2,6 +2,32 @@
 
 All notable changes to HRIZN are documented here.
 
+## [1.2.0] - 2026-08-17
+
+### Changed
+- Inbound webhooks now run entirely on core's Integration Fabric. The hand-rolled
+  receiver, signature verifier, and public route (`/integrations/hrizn/webhook/{token}`)
+  are removed; the HRIZN platform now posts to core's public ingress
+  (`/api/webhooks/inbound/{slug}` → `InboundWebhookManager`), which resolves the tenant
+  from an opaque per-tenant `WebhookEndpoint` slug, verifies the HMAC (core
+  `HmacSha256Verifier`, `sha256=` scheme unchanged), enforces freshness, and dedupes
+  replays. A synchronous listener (`HandleInboundWebhook`) runs the six lifecycle
+  handlers inside the resolved tenant scope. **Operators must re-register the webhook**
+  (Settings → register) to obtain the new slug-based callback URL.
+- Each inbound webhook dispatch is recorded as a core `IntegrationRun`
+  (`integration_type='hrizn_webhook'`, no cadence), so failed processing is now a
+  durable, tenant-scoped record instead of a log line only.
+- The per-tenant webhook signing secret moved out of the encrypted plugin namespace
+  onto the core `WebhookEndpoint` (`secrets.signing_secret`, encrypted at rest);
+  `removeApiKey` deactivates the endpoint so a disconnected tenant stops accepting
+  deliveries.
+- The content↔vehicle link relation verb now comes from core
+  (`App\Support\EntityRelation::COVERS`); byte-identical on disk.
+
+### Notes
+- Zero core changes. No new plugin tables/migrations — the Fabric tables
+  (`integration_runs`, `webhook_endpoints`, `webhook_deliveries`) are core-provisioned.
+
 ## [1.1.1] - 2026-08-05
 
 ### Changed
