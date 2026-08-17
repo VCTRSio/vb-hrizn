@@ -197,7 +197,7 @@ it('records a FAILED run and swallows when a handler throws (still ACKs)', funct
     {
         protected function dispatch(string $type, array $data): ?int
         {
-            throw new \RuntimeException('boom-handler');
+            throw new RuntimeException('boom-handler');
         }
     };
 
