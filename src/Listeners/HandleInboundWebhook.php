@@ -2,104 +2,77 @@
 
 declare(strict_types=1);
 
-namespace Vctrs\Plugins\VbHrizn\Http\Controllers;
+namespace Vctrs\Plugins\VbHrizn\Listeners;
 
 use App\Events\FeedEventRequested;
+use App\Events\InboundWebhookReceived;
 use App\Events\TaskRequested;
-use App\Http\Controllers\Controller;
-use App\Models\PluginNamespace;
-use App\Support\SystemContext;
+use App\Support\Integration\IntegrationRunRecorder;
 use App\Support\TenantContext;
-use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Vctrs\Plugins\VbHrizn\Models\HriznContent;
 use Vctrs\Plugins\VbHrizn\Models\HriznIdeacloud;
-use Vctrs\Plugins\VbHrizn\Support\HriznNamespace;
 use Vctrs\Plugins\VbHrizn\Support\HriznRelation;
-use Vctrs\Plugins\VbHrizn\Support\HriznWebhookSignature;
 
 /**
- * Public inbound Hrizn webhook receiver.
+ * Synchronous listener for the core inbound-webhook event. The core
+ * InboundWebhookManager has already resolved the tenant from the opaque slug,
+ * verified the HMAC over the raw body, enforced freshness, and deduped replays —
+ * and fires this event INSIDE the resolved tenant scope. We only act on our own
+ * deliveries (routing_key = 'vb-hrizn') and record each dispatch as an
+ * IntegrationRun (start → succeed/fail, no cadence: hrizn's inbound traffic is
+ * sporadic, so silence-detection is meaningless — the value is the fail/success
+ * ledger). NOT ShouldQueue: hrizn has no queue/jobs.
  *
- * Runs OUTSIDE the web/auth/tenant middleware stack (Hrizn has no VCTRS session).
- * The opaque {token} in the URL is the PluginNamespace.id (a uuid) chosen when
- * the webhook was registered; it maps back to (tenant_type, tenant_id) and the
- * per-tenant webhook secret. The HMAC-SHA256 signature (header X-Webhook-Signature)
- * is verified against the raw body before any row is touched; handlers then run
- * under SystemContext::runAsTenant so tenant scopes + audit apply.
- *
- * Ports core inngest.ts (6 handlers) + the Next.js API route's signature check.
+ * Ports the six handlers from the retired WebhookController::dispatch verbatim.
  */
-class WebhookController extends Controller
+class HandleInboundWebhook
 {
-    public function receive(Request $request, string $token): JsonResponse
+    public function handle(InboundWebhookReceived $event): void
     {
-        // QOL DIVERGENCE (#6): public webhook route, no tenant context yet — the opaque
-        // token IS the capability. Bypass fail-closed RLS for this pre-tenant lookup.
-        // Both reads below (the namespace row AND the per-tenant secret) hit FORCE-RLS
-        // tenant tables (plugin_namespaces) BEFORE any app.tenant_* GUC is set — the
-        // tenant is being resolved FROM this lookup — so each must run under runUnscoped.
-        $ns = SystemContext::runUnscoped(
-            fn () => PluginNamespace::query()->where('id', $token)->where('plugin_slug', 'vb-hrizn')->first()
-        );
-        if ($ns === null) {
-            return response()->json(['message' => 'Unknown webhook token.'], 404);
-        }
-        $tenantType = (string) $ns->getAttribute('tenant_type');
-        $tenantId = (string) $ns->getAttribute('tenant_id');
-
-        // Same pre-tenant bypass: the secret lives in plugin_namespaces (FORCE RLS) and
-        // is read before the GUC is set, so a bare get() is invisible to app_user.
-        $secrets = SystemContext::runUnscoped(
-            fn () => HriznNamespace::get($tenantType, $tenantId)
-        );
-        $secret = $secrets['webhookSecret'] ?? null;
-        if (! is_string($secret) || $secret === '') {
-            return response()->json(['message' => 'Webhook not configured.'], 404);
+        if ($event->routingKey !== HriznRelation::PLUGIN_NAMESPACE) {
+            return; // not ours
         }
 
-        $rawBody = $request->getContent();
-        $signature = (string) $request->header('X-Webhook-Signature', '');
-        if (! HriznWebhookSignature::verify($rawBody, $signature, $secret)) {
-            return response()->json(['message' => 'Invalid signature.'], 401);
+        $payload = $event->payload;
+        $type = is_string($payload['type'] ?? null) ? $payload['type'] : null;
+        if ($type === null) {
+            return; // core accepted a JSON body without our envelope shape
         }
+        $data = is_array($payload['data'] ?? null) ? $payload['data'] : [];
 
-        $envelope = json_decode($rawBody, true);
-        if (! is_array($envelope) || ! is_string($envelope['type'] ?? null)) {
-            return response()->json(['message' => 'Malformed payload.'], 422);
+        $run = app(IntegrationRunRecorder::class)->start('hrizn_webhook', $type, 'webhook');
+        try {
+            $rows = $this->dispatch($type, $data);
+            $run->succeed(['type' => $type, 'rows' => (int) $rows]);
+
+            if ($rows === 0) {
+                $id = $data['article_id'] ?? $data['ideacloud_id'] ?? 'unknown';
+                Log::warning("[hrizn] {$type}: 0 rows updated (id={$id})");
+            }
+        } catch (\Throwable $e) {
+            // Core deduped this delivery BEFORE firing, so a re-throw → 500 → sender
+            // retry would just be a Duplicate (no event, handler never re-runs). The
+            // failed run IS the observable record; swallow so the request still ACKs.
+            $run->fail($e);
+            report($e);
         }
-        $type = $envelope['type'];
-        $data = is_array($envelope['data'] ?? null) ? $envelope['data'] : [];
-
-        SystemContext::runAsTenant($tenantType, $tenantId, function () use ($type, $data) {
-            $this->dispatch($type, $data);
-        });
-
-        return response()->json(['ok' => true]);
     }
 
     /**
      * @param  array<string, mixed>  $data
      */
-    private function dispatch(string $type, array $data): void
+    protected function dispatch(string $type, array $data): ?int
     {
-        $rows = match ($type) {
+        return match ($type) {
             'ideacloud.completed' => $this->onIdeacloudCompleted($data),
             'ideacloud.failed' => $this->setIdeacloudStatus($data, 'failed'),
             'content.progress' => $this->onContentProgress($data),
             'content.completed' => $this->onContentCompleted($data),
             'content.failed' => $this->onContentFailed($data),
             'compliance.completed' => $this->onComplianceCompleted($data),
-            default => null, // content_tools.completed + others: acknowledged, no local write (core has no handler)
+            default => null, // content_tools.completed + others: acknowledged, no local write
         };
-
-        // Mirror core inngest.ts: a verified webhook that matched no local row is a
-        // no-op we warn about (each of core's 6 handlers logs `0 rows updated`).
-        if ($rows === 0) {
-            $id = $data['article_id'] ?? $data['ideacloud_id'] ?? 'unknown';
-            Log::warning("[hrizn] {$type}: 0 rows updated (id={$id})");
-        }
     }
 
     /** @param array<string, mixed> $data */

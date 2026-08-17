@@ -5,8 +5,9 @@ declare(strict_types=1);
 /**
  * THE proof: the shipping HRIZN plugin, packaged and SIGNED with the real VCTRS
  * first-party key, installs into the app, boots its server code, serves an
- * enveloped JSON route over HTTP, creates its schema — AND its public inbound
- * webhook receiver verifies an HMAC signature and mutates a local row.
+ * enveloped JSON route over HTTP, creates its schema — AND an inbound delivery
+ * through core's webhook ingress (/api/webhooks/inbound/{slug}) reaches the
+ * plugin's HandleInboundWebhook listener and mutates a local row.
  *
  * This is the exact regression the vb-native spike caught (uploaded server-code
  * plugins that never boot in a web request → routes 404). The plugin tree is
@@ -15,13 +16,12 @@ declare(strict_types=1);
  */
 
 use App\Models\Plugin;
-use App\Models\PluginNamespace;
+use App\Models\WebhookEndpoint;
 use App\Plugins\PluginManager;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Vctrs\Plugins\VbHrizn\Models\HriznContent;
-use Vctrs\Plugins\VbHrizn\Support\HriznNamespace;
 
 require_once __DIR__.'/hz_bootstrap.php';
 
@@ -58,12 +58,12 @@ it('installs the signed vb-hrizn, boots it, serves an enveloped route, creates i
         ->assertJsonPath('status', 'success');
 
     // ── WEBHOOK RECEIVE PROOF ────────────────────────────────────────────────
-    // Seed a local content row + a per-tenant webhook secret, then post a signed
-    // content.completed envelope to the PUBLIC inbound receiver and prove the row
-    // transitioned to 'complete'. The HMAC is computed over the EXACT bytes sent
-    // (raw content string via ->call()), so the signature matches what the
-    // receiver verifies — mirrors HriznWebhookTest::postHriznWebhook exactly.
-    $secret = 'whsec_boot';
+    // Seed a local content row + provision this tenant's core WebhookEndpoint,
+    // then post a signed content.completed envelope to core's inbound ingress
+    // (/api/webhooks/inbound/{slug}) and prove the row transitioned to
+    // 'complete' via the booted plugin's HandleInboundWebhook listener. The HMAC
+    // is computed over the EXACT bytes sent (raw content string via ->call()),
+    // so the signature matches what core's InboundWebhookManager verifies.
     $content = HriznContent::withoutTenantScope()->create([
         'tenant_type' => 'rooftop',
         'tenant_id' => PLUGIN_TEST_TENANT,
@@ -74,20 +74,15 @@ it('installs the signed vb-hrizn, boots it, serves an enveloped route, creates i
         'created_by' => $user->id,
     ]);
 
-    // Register the token namespace with the known secret; the receiver maps the
-    // token → tenant via PluginNamespace (namespace = 'vb-hrizn:'.tenant).
-    HriznNamespace::patch('rooftop', PLUGIN_TEST_TENANT, ['apiKey' => 'hzk_ok', 'webhookSecret' => $secret]);
-    $token = (string) PluginNamespace::query()
-        ->where('namespace', 'vb-hrizn:'.PLUGIN_TEST_TENANT)
-        ->value('id');
-    expect($token)->not->toBeEmpty();
+    $ep = WebhookEndpoint::provision('rooftop', PLUGIN_TEST_TENANT, 'vb-hrizn');
+    $secret = $ep->secrets['signing_secret'];
 
     $raw = json_encode(['type' => 'content.completed', 'data' => ['article_id' => 'art_x']]);
     $sig = 'sha256='.hash_hmac('sha256', $raw, $secret);
 
-    $this->call('POST', "/integrations/hrizn/webhook/{$token}", [], [], [],
+    $this->call('POST', "/api/webhooks/inbound/{$ep->slug}", [], [], [],
         ['HTTP_X-Webhook-Signature' => $sig, 'CONTENT_TYPE' => 'application/json'], $raw)
-        ->assertOk();
+        ->assertStatus(202);
 
     expect($content->refresh()->status)->toBe('complete');
 });

@@ -3,7 +3,6 @@
 use Illuminate\Support\Facades\Http;
 use Vctrs\Plugins\VbHrizn\Services\HriznApiException;
 use Vctrs\Plugins\VbHrizn\Services\HriznClient;
-use Vctrs\Plugins\VbHrizn\Support\HriznWebhookSignature;
 
 require_once __DIR__.'/hz_bootstrap.php';
 
@@ -106,14 +105,4 @@ it('getContentHtml requests text/html and returns the raw body', function () {
 
     expect((new HriznClient('hzk_ok'))->getContentHtml('c1'))->toBe('<h1>Hi</h1>');
     Http::assertSent(fn ($r) => $r->hasHeader('Accept', 'text/html'));
-});
-
-it('verifies a valid sha256 HMAC signature and rejects a tampered one', function () {
-    $secret = 'whsec_test';
-    $body = '{"type":"content.completed","data":{"article_id":"c1"}}';
-    $good = 'sha256='.hash_hmac('sha256', $body, $secret);
-
-    expect(HriznWebhookSignature::verify($body, $good, $secret))->toBeTrue()
-        ->and(HriznWebhookSignature::verify($body, 'sha256=deadbeef', $secret))->toBeFalse()
-        ->and(HriznWebhookSignature::verify($body, 'nope', $secret))->toBeFalse();
 });

@@ -3,9 +3,12 @@
 namespace Vctrs\Plugins\VbHrizn;
 
 use App\Audit\AuditableRegistry;
+use App\Events\InboundWebhookReceived;
 use App\Plugins\Contracts\PluginModule;
 use App\Plugins\PluginManifest;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
+use Vctrs\Plugins\VbHrizn\Listeners\HandleInboundWebhook;
 use Vctrs\Plugins\VbHrizn\Models\HriznContent;
 use Vctrs\Plugins\VbHrizn\Models\HriznIdeacloud;
 use Vctrs\Plugins\VbHrizn\Support\HriznClientFactory;
@@ -28,6 +31,8 @@ class HriznServiceProvider implements PluginModule
 
         AuditableRegistry::register(HriznIdeacloud::class);
         AuditableRegistry::register(HriznContent::class);
+
+        Event::listen(InboundWebhookReceived::class, [HandleInboundWebhook::class, 'handle']);
     }
 
     public function navItems(): array
