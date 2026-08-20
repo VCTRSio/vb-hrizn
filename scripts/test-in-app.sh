@@ -73,7 +73,7 @@ docker compose exec -T postgres sh -c \
    echo '   '$DB' ready'"
 
 echo ">> running pest ($TARGET) in worktree ($WT)…"
-docker compose run --rm -T \
+docker compose run --rm -T --no-deps \
   -v "$WT:/var/www/html" \
   -v "$MAIN/vendor:/var/www/html/vendor" \
   -v "$PLUGIN:/hz-src:ro" \
