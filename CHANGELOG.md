@@ -2,6 +2,14 @@
 
 All notable changes to HRIZN are documented here.
 
+## [1.2.1] - 2026-08-22
+
+### Fixed
+- `HriznRelation::VEHICLE_TARGET_TYPE` now aliases core `EntityType::INVENTORY_VEHICLE`
+  (`inventory.vehicle`) instead of the drifted literal `inventory_vehicle`, so HRIZN's
+  vehicle EntityReference edges use the canonical value every sibling plugin queries.
+  Code-only per owner decision — pre-existing rows keep the old value (no back-migration).
+
 ## [1.2.0] - 2026-08-17
 
 ### Changed
